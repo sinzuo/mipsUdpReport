@@ -1,0 +1,9 @@
+{
+    "name": "getResponse",
+    "version": "1.0.0",
+    "serialnumber": "%s",
+    "keyname": "inform",
+    "packet": {
+        "InternetGatewayDevice.LANDevice.1.Wireless.WiFiClient": %s
+    }
+}
