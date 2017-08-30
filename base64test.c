@@ -127,9 +127,47 @@ size_t Base64_Encode(char *pDest, const char *pSrc, size_t srclen)
     return index_dest;
 }
 
+char deviceType[] ="IJLY_410";
+
+int check_image_name(char *name)
+{
+  int length =0;
+  char tempName[32];
+  
+  if(name==NULL)
+  {
+  return 0;
+  }else {
+    
+    if(!strcmp(deviceType,"IJLY_410"))
+    {
+        if(strstr(name,"D12_7628n_8m_IJLY410"))
+        {
+            return 1;
+        }else{
+            return 0;
+        }
+    }else if(!strcmp(deviceType,"IJLY_420")){
+        if(strstr(name,"D11_7628n_16m_IJLY420"))
+        {
+            return 1;
+        }else{
+            return 0;
+        }
+
+    }else{
+      return 0;
+    }
+
+  }
+  return 1;
+}
+
 
 void main()
 {
-	printf("jiangyibo\n");
+    int check;
+    check= check_image_name("D12_7628n_8m_IJLY410_v2.1.15.2_170817.bin");
+	printf("jiangyibo %d\n",check);
 
 }

@@ -6,9 +6,9 @@
     "packet": {
         "dev_type": "1",
         "SerialNumber": "%s",
-        "Manufacturer": "PIFII",
+        "Manufacturer": "CMTT",
         "ManufacturerOUI": "PIFII",
-        "ProductClass": "PF-308",
+        "ProductClass": "%s",
         "HardwareVersion": "%s",
         "SoftwareVersion": "%s",
         "cpu_utilization": "%d%%",
@@ -16,13 +16,9 @@
         "flash_utilization": "7300 / 16384",
         "UpTime": "%d",
         "client_speed": "1561071965 1175873324",
-        "wan_current_ip_addr": "10.0.68.30",
+        "wan_current_ip_addr": "%s",
         "work_mode": "AP",
-        "WiFiClient": [
-            { "mac": "60:6D:C7:35:C5:A7", "type": "0", "host": "", "ip": "" },
-            { "mac": "2C:D0:5A:EC:AA:C6", "type": "0", "host": "", "ip": "" },
-            { "mac": "74:51:BA:E1:E3:26", "type": "0", "host": "", "ip": "" }
-        ],
+        "WiFiClient": [],
         "portstate": {
             "port5": 1,
             "port4": 0,

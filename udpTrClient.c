@@ -2,8 +2,6 @@
     "window.zoomLevel": 0,
     "files.autoSave": "off"
 } > 
-mipsel-openwrt-linux-gcc udpTrClient.c b64.c -L./ -I./json/out/include/json/  -L./json/out/lib -ljson -luci -lubox  -o udpreport
-
  ************************************************************************/
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -20,8 +18,11 @@ mipsel-openwrt-linux-gcc udpTrClient.c b64.c -L./ -I./json/out/include/json/  -L
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
-
+#include <net/if.h>
+#include <net/if_arp.h>
 #include <sys/wait.h>
+
+#include <sys/ioctl.h> 
 
 #include <sys/types.h>
 #include <sys/ipc.h>
@@ -45,11 +46,14 @@ mipsel-openwrt-linux-gcc udpTrClient.c b64.c -L./ -I./json/out/include/json/  -L
 #define APP_VERSION 1
 #define SERVER_IP "192.168.3.68" //tz.pifii.com
 #define SERVER_PORT "8880"
-#define HTTPPOST_IP "192.168.3.151"//tz.pifii.com
+#define HTTPPOST_IP "192.168.3.68"//tz.pifii.com
 #define HTTPPOST_PORT "8082"
-#define HTTPPOST_PATH "/wifi_home/acsjson"
+#define HTTPPOST_PATH "/wifi_home_gx/acsjson"
 #define HARD_VERSION "v2.1.8"
-#define SOFT_VERSION "v2.1.8"
+#define SOFT_VERSION "v2.1.17"
+#define DEVICE_TYPE_E "IJLY_410"
+
+int debug_mode = 0;
 
 
 static char *fc_script = "/usr/sbin/freecwmp";
@@ -71,7 +75,9 @@ static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
 #define GetResponse "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
 				\"keyname\": \"config\",\"packet\": {%s}}"
 #define GetReport "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
-				\"keyname\": \"reportconfig\",\"packet\": {%s}}"        
+				\"keyname\": \"reportconfig\",\"packet\": {%s}}"  
+#define GetBlackmac "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
+				\"keyname\": \"blackmac\",\"packet\": {%s}}"                
 #define TestJson "{\"name\": \"get\",\"version\": \"1.0.0\",\"serialnumber\": \"112233445566\",\
 				\"keyname\": \"getvalue\",\"packet\": {\"UpTime\": \"sss\",\"wan_type\": \"sss\"}}"
 #define HomeResponse "{\"sid\": \"%s\",\"id\": \"%s\",\"ver\": \"%s\",\
@@ -86,6 +92,7 @@ char reportServerPort[32];
 char httpPostServerIp[32];
 char httpPostServerPort[32];
 char httpPostServerPath[32];
+char deviceType[32];
 
 #define FREE(x) \
   do            \
@@ -197,6 +204,7 @@ int external_get_action(char *action, char *name, char **value)
   int pfds[2];
   char *c = NULL;
 
+ if(debug_mode>0)
   printf("jiangyibo action %s %s\n", action, name);
 
   if (pipe(pfds) < 0)
@@ -248,6 +256,7 @@ int external_get_action(char *action, char *name, char **value)
     if (*value)
     {
       t = asprintf(&c, "%s%.*s", *value, (int)rxed, buffer);
+      if(debug_mode>0)
       printf("jiangyibo get kkkkk%s\n", c);
     }
     else
@@ -256,9 +265,11 @@ int external_get_action(char *action, char *name, char **value)
       t = asprintf(&c, "%.*s", (int)rxed, buffer);
       /*      *value = NULL;
       goto done;
-*/
+*/   
+     if(debug_mode>0)
       printf("jiangyibo get %s\n", c);
     }
+    if(debug_mode>0)
     printf("jiangyibo get kkkkk sss %d %s\n",t, c);
     if (t == -1)
       goto error;
@@ -554,13 +565,16 @@ int commandSendtoHomeDevice(int server_socket_fd, char *mac, char *sendData)
     client_addr.sin_family = AF_INET;
       client_addr.sin_port = htons(HOMEDEV_PORT);
     client_addr.sin_addr.s_addr = addr;
+    if(debug_mode>0)
     printf("command send %0x\n",addr);
     if (sendto(server_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&client_addr, client_addr_length) < 0)
     {
+      if(debug_mode>0)
       printf("Send File Name Failed:");
     }
     else
     {
+      if(debug_mode>0)
       printf("Send ok\n");
     }
 
@@ -739,6 +753,7 @@ int jsonGetConfig(SOCKET s, json_object *config)
 
   if (config == NULL)
   {
+    if(debug_mode>0)
     printf("jyb test error\n");
     return;
   }
@@ -746,6 +761,7 @@ int jsonGetConfig(SOCKET s, json_object *config)
   struct lh_entry *entry = json_object_get_object(obj)->head;
   for (; entry != NULL;)
   {
+    if(debug_mode>0)
     printf("ri mabi\n");
     if (entry)
     {
@@ -755,10 +771,11 @@ int jsonGetConfig(SOCKET s, json_object *config)
     }
     else
     {
+      if(debug_mode>0)
       printf("mabi\n");
       break;
     }
-
+    if(debug_mode>0)
     printf("jiangyibo sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
@@ -769,6 +786,7 @@ int jsonGetConfig(SOCKET s, json_object *config)
     default:
       break;
     }
+    if(debug_mode>0)
     printf("jyb test %s %s\n", key, tempVal);
     memset(tempstr, 0, 1024);
     sprintf(tempstr, "%s", key);
@@ -779,24 +797,53 @@ int jsonGetConfig(SOCKET s, json_object *config)
       {
         if (value == NULL)
         {
-          sprintf(kvbuf, "\"%s\":\"\"", key);
+          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+              snprintf(kvbuf,1792, "\"%s\":[]", key);
+          }
+          else
+          {
+             snprintf(kvbuf,1792, "\"%s\":\"\"", key);
+          }
         }
         else
         {
-          sprintf(kvbuf, "\"%s\":\"%s\"", key, value);
+          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+              snprintf(kvbuf,1792, "\"%s\":%s", key, value);
+          }
+          else
+          {
+          snprintf(kvbuf,1792, "\"%s\":\"%s\"", key, value);
+          }
         }
       }
       else
       {
         if (value == NULL)
         {
-          sprintf(kvbuf, "%s,\"%s\":\"\"", kvbuf, key);
+          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+              snprintf(kvbuf,1792, "%s,%s:[]", kvbuf, key);
+          }
+          else
+          {
+               snprintf(kvbuf,1792, "%s,\"%s\":\"\"", kvbuf, key);
+          }
         }
         else
         {
-          sprintf(kvbuf, "%s,\"%s\":\"%s\"", kvbuf, key, value);
+          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+               snprintf(kvbuf,1792, "%s,\"%s\":%s", kvbuf, key, value);
+          }
+          else
+          {
+          snprintf(kvbuf,1792, "%s,\"%s\":\"%s\"", kvbuf, key, value);
+          }
         }
       }
+      if(debug_mode>0)
       printf("jyb test  value %s \n", value);
       free(value);
       value = NULL;
@@ -807,11 +854,25 @@ int jsonGetConfig(SOCKET s, json_object *config)
       {
         if (index++ == 0)
         {
-          sprintf(kvbuf, "\"%s\":\"\"", value);
+          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+              snprintf(kvbuf, 1792,"\"%s\":[]", key);
+          }
+          else
+          {
+          snprintf(kvbuf, 1792,"\"%s\":\"\"", key);
+          }
         }
         else
         {
-          sprintf(kvbuf, "%s,\"%s\":\"\"", kvbuf, key);
+           if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          {
+              snprintf(kvbuf,1792, "%s,\"%s\":[]", kvbuf, key);
+          }
+          else
+          {
+          snprintf(kvbuf,1792, "%s,\"%s\":\"\"", kvbuf, key);
+          }
         }
       }
     }
@@ -822,11 +883,13 @@ int jsonGetConfig(SOCKET s, json_object *config)
     }
   }
   memset(sendbuf, 0, 2048);
-  sprintf(sendbuf, GetResponse, deviceMac, kvbuf);
+  snprintf(sendbuf,sizeof(sendbuf), GetResponse, deviceMac, kvbuf);
 
+if(debug_mode>0)
   printf("jiangyibo send mmmmmm %s\n", sendbuf);
 
   httppost(sendbuf, strlen(sendbuf));
+  if(debug_mode>0)
   printf("jiangyibo send mmmmmm  333\n");
   // rc = send(s, sendbuf, strlen(sendbuf), 0);
 
@@ -836,19 +899,19 @@ int jsonGetConfig(SOCKET s, json_object *config)
 int jsonSetConfig(SOCKET s, json_object *config)
 {
   int rc = 0;
-  char tempstr[2048];
   char *tempVal = NULL;
   enum json_type type;
   int index = 0;
   json_object *obj = config;
-  memset(tempstr, 0, 2048);
   int strlenssid = 0;
+  char urlComm[256];
   char *pssid = NULL;
 
   if (config == NULL)
   {
+    if(debug_mode>0)
     printf("jyb test %s\n", config);
-    return;
+    return 0;
   }
 
   char *key;
@@ -861,6 +924,7 @@ int jsonSetConfig(SOCKET s, json_object *config)
   for (; entry != NULL;)
   {
     pssid = NULL;
+    if(debug_mode>0)
     printf("ri mabi\n");
     if (entry)
     {
@@ -870,10 +934,11 @@ int jsonSetConfig(SOCKET s, json_object *config)
     }
     else
     {
+      if(debug_mode>0)
       printf("mabi\n");
       break;
     }
-
+    if(debug_mode>0)
     printf("jiangyibo sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
@@ -884,13 +949,21 @@ int jsonSetConfig(SOCKET s, json_object *config)
     default:
       break;
     }
-
+    if(debug_mode>0)
     printf("jyb test 55555555 %s %s\n", key, tempVal);
-    if (key != NULL && !strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid"))
+    if (key != NULL &&(!strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid")||!strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")||!strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid2")))
     {
       strlenssid = strlen(tempVal);
       pssid = zstream_b64decode(tempVal, &strlenssid);
-      tempVal = pssid;
+      
+      if(strlen(pssid)>strlenssid)
+      {
+        memset(urlComm,0,256);
+        memcpy(urlComm,pssid,strlenssid);
+        tempVal=urlComm;
+      }else {
+        tempVal = pssid;
+      }
     }
 
     if (external_set_action_write("value", key, tempVal))
@@ -907,11 +980,8 @@ int jsonSetConfig(SOCKET s, json_object *config)
     }
   }
   external_set_action_execute();
-  memset(tempstr, 0, 1024);
-  sprintf(tempstr, SetResponse, deviceMac, "setok");
-
-  // rc = send(s, tempstr, sizeof(tempstr), 0);
-
+  if(debug_mode>0)
+  printf("jiangyibo exec set ok\n");
   return rc;
 }
 
@@ -920,12 +990,13 @@ int read_mac()
   FILE *fp = NULL;
   char ch;
   char bufexe[128];
-  char buffstr[4096];
+  char buffstr[32];
   memset(deviceMac, 0, 13);
   memset(deviceMacFu, 0, 18);
 
   if ((fp = fopen("/dev/mtdblock2", "r")) == NULL)
   {
+    
     printf("file cannot be opened/n");
   }
   fgets(buffstr, 32, fp);
@@ -982,22 +1053,23 @@ char *exeShell(char *comm)
 
   if (NULL == (fstream = popen(comm, "r")))
   {
-    fprintf(stderr, "execute command failed: %s", strerror(errno));
-    return "error";
+    sprintf(cliBuff, "execute command failed: %s", strerror(errno));
+    return cliBuff;
   }
-  /*    if(NULL!=fread(cliBuff,1, sizeof(cliBuff), fstream))    
+      if(NULL!=fread(cliBuff,1, sizeof(cliBuff), fstream))    
     {    
+       if(debug_mode>0)
         printf("exeShell zhi\n");   
+        pclose(fstream);
+        return cliBuff;
     }    
     else   
     {   
+        sprintf(cliBuff, "execute error");
         pclose(fstream);   
         return cliBuff;   
     }   
-    */
-  pclose(fstream);
-
-  return cliBuff;
+  
 }
 
 int getCpuUsage()
@@ -1045,7 +1117,7 @@ struct mem_usage_t
   unsigned long cached;
 };
 
-int getMemUsage()
+int getMemUsage(int *memtotal,int *memfreeuse)
 {
   FILE *fp = NULL;
   struct mem_usage_t memge;
@@ -1102,7 +1174,8 @@ int getMemUsage()
       break;
     }
   }
-  // printf("jiangyibo mem %d \n",(int)((memfree*100.0)/total));
+  *memtotal = total;
+  *memfreeuse = memfree;
 
   return (int)((memfree * 100.0) / total);
 }
@@ -1339,12 +1412,34 @@ void set_pifii_report(char *s1_addr,char *s1_port,char *s2_addr,char *s2_port,ch
   uci_free_context(ctx); //释放上下文
 }
 
+int setblackmac(char *p,char *strblackmac)
+{
+	char tmp[256];
+	char *sep=",";
+	char *token=NULL;
+	strcpy(tmp,p);
+	for(token=strtok(tmp,sep);token != NULL;token=strtok(NULL,sep))
+	{
+		printf("%s\n",token);
+	}
+	return 0;
+}
+
 
 void set_pifii_uci(char *enable,char *weekdays,char *blacklist,char *timespan1,char *timespan2,char *timespan3)
 {
   char option[16];
+  char tempValue[8];
+  int  rc;
   struct uci_context *ctx = uci_alloc_context(); //申请上下文
   struct uci_ptr ptr = {
+      .package = "pifii",
+      .section = "server",
+      //.option = "value",
+      //.value = "256",
+  };
+
+  struct uci_ptr ptrO = {
       .package = "pifii",
       .section = "server",
       //.option = "value",
@@ -1355,33 +1450,47 @@ void set_pifii_uci(char *enable,char *weekdays,char *blacklist,char *timespan1,c
   ptr.option = option;
   ptr.value = enable;
   uci_set(ctx, &ptr);             //写入配置
+
   memset(option,0,16);
   strcpy(option,"weekdays");
   ptr.option = option;
   ptr.value = weekdays;
   uci_set(ctx, &ptr);             //写入配置
+
   memset(option,0,16);
   strcpy(option,"blacklist");
   ptr.option = option;
   ptr.value = blacklist;
   uci_set(ctx, &ptr);             //写入配置
+
   memset(option,0,16);
   strcpy(option,"timespan1");
   ptr.option = option;
   ptr.value = timespan1;
   uci_set(ctx, &ptr);             //写入配置
+
+
+ 
   memset(option,0,16);
   strcpy(option,"timespan2");
   ptr.option = option;
   ptr.value = timespan2;
   uci_set(ctx, &ptr);             //写入配置
-  memset(option,0,16);
-  strcpy(option,"timespan3");
-  ptr.option = option;
-  ptr.value = timespan3;
-  uci_set(ctx, &ptr);             //写入配置  
   uci_commit(ctx, &ptr.p, false); //提交保存更改
   uci_unload(ctx, ptr.p);         //卸载包
+
+
+  memset(option,0,16);
+  strcpy(option,"timespan3");
+  strcpy(tempValue,timespan3);
+  ptrO.option = option;
+  ptrO.value = tempValue;
+  rc= uci_set(ctx, &ptrO);    
+           //写入配置 
+if(debug_mode>0)           
+ printf("jiangyibo timespan2 %s option=%s %d\n",timespan2,option,rc); 
+  uci_commit(ctx, &ptrO.p, false); //提交保存更改
+  uci_unload(ctx, ptrO.p);         //卸载包
 
   uci_free_context(ctx); //释放上下文
 }
@@ -1658,11 +1767,78 @@ void returnReportInfo(char *reportMsg)
     reportServerIp,reportServerPort,httpPostServerIp,httpPostServerPort,httpPostServerPath);
 }
 
+int getUciValue(struct uci_context *c,char *key,char *value)
+{
+   char  buf[64];
+   struct uci_ptr p;
+     sprintf(buf, "pifii.server.%s",key);
+  if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
+  {
+    sprintf(value, "");
+  }
+  else
+  {
+    if (p.o != NULL)
+    {
+      sprintf(value, p.o->v.string);
+    }
+    else
+    {
+      sprintf(value, "");
+    }
+  }
+
+   return 1;
+
+}
+
+void returnBlackMac(char *reportMsg)
+{
+  char enable[10];
+  char weekdays[10];
+  char blacklist[256];
+  char timespan1[10];
+  char timespan2[10];
+  char timespan3[10];
+
+
+
+  char buf[64];
+   struct uci_context *c = uci_alloc_context();
+
+
+  getUciValue(c,  "enable", enable);
+  getUciValue(c, "weekdays", weekdays);
+  getUciValue(c, "blacklist", blacklist);
+  getUciValue(c,  "timespan1", timespan1);
+  getUciValue(c,  "timespan2", timespan2);
+  getUciValue(c, "timespan3", timespan3);
+
+  uci_free_context(c);
+
+  sprintf(reportMsg, "\"enable\":\"%s\",\"weekdays\":\"%s\",\"blacklist\":\"%s\",\"timespan1\":\"%s\",\"timespan2\":\"%s\",\"timespan3\":\"%s\"",
+          enable,weekdays, blacklist, timespan1, timespan2, timespan3);
+}
 
 void initReportConfig(struct uci_context *c)
 {
   char buf[64];
   struct uci_ptr p;
+  
+  sprintf(buf, "pifii.server.devicetype");
+  if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
+  {
+    sprintf(deviceType,DEVICE_TYPE_E);
+  }
+  else
+  {
+    if (p.o != NULL)
+    {
+       sprintf(deviceType,p.o->v.string);
+    }else{
+      sprintf(deviceType,DEVICE_TYPE_E);
+    }
+  }
 
 
   sprintf(buf, "pifii.server.reportaddr");
@@ -1848,14 +2024,48 @@ int threadHome()
   
 }
 */
+int check_image_name(char *name)
+{
+  int length =0;
+  char tempName[32];
+  
+  if(name==NULL)
+  {
+  return 0;
+  }else {
+    
+    if(!strcmp(deviceType,"IJLY_410"))
+    {
+        if(strstr(name,"D12_7628n_8m_IJLY410")!=NULL)
+        {
+            return 1;
+        }else{
+            return 0;
+        }
+    }else if(!strcmp(deviceType,"IJLY_420")){
+        if(strstr(name,"D11_7628n_16m_IJLY420")!=NULL)
+        {
+            return 1;
+        }else{
+            return 0;
+        }
+
+    }else{
+      return 0;
+    }
+
+  }
+  return 1;
+}
 
 int threadUdp(int *socket_fd)
 {
   int client_socket_fd = *socket_fd;
   char recvData[4096];
   char sendmsgData[1500];
-  char tempstr[1500];
+  char tempstr[2048];
   char *wificlient=NULL;
+  int uptime;
 
   int id = 1;
   json_object *pobj, *p1_obj, *p2_obj, *p3_obj = NULL;
@@ -1865,6 +2075,7 @@ int threadUdp(int *socket_fd)
   char *hsid, *hid, *hver, *hcmdtype,*hdevtype,*hstatstr;
 
   int param_int;
+  int checkName;
 
   char *typeE, *name, *command;
 
@@ -1892,12 +2103,15 @@ int threadUdp(int *socket_fd)
     memset(recvData, 0, 4096);
     if ((len = recvfrom(client_socket_fd, recvData, sizeof(recvData), 0, (struct sockaddr *)&server_addr, &server_addr_length)) > 0)
     {
-      printf("jiangyibo 888%s\n", recvData);
+      if(debug_mode>0)
+      printf("jiangyibo recv%s\n", recvData);
       //     new_obj = json_tokener_parse(TestJson);
       new_obj = json_tokener_parse(recvData);
-      printf("jiangyibo 888 333%s\n", recvData);
+      if(debug_mode>0)
+      printf("jiangyibo recv 333%s\n", recvData);
       if (new_obj==NULL||is_error(new_obj))
       {
+        if(debug_mode>0)
         printf("jiangyibo error para%s\n");
         // rc = send(s, ErrorJson, sizeof(ErrorJson), 0);
       }
@@ -1908,6 +2122,7 @@ int threadUdp(int *socket_fd)
         name = GetValByEtype(new_obj, "name");
 
         //typeE = GetValByEtype(new_obj, "params");
+        if(debug_mode>0)
         printf("jiangyibo recv name %s\n", name);
         if (name == NULL)
         {
@@ -1930,7 +2145,8 @@ int threadUdp(int *socket_fd)
             AddHomeDevice(hid, server_addr.sin_addr.s_addr,hdevtype,hstatstr);
             memset(sendmsgData, 0, 1500);
             sprintf(sendmsgData, HomeResponse, hsid, hid, hver);
-
+            server_addr.sin_port = htons(HOMEDEV_PORT);
+            if(debug_mode>0)
              printf("jiangyibo homedevice %s\n",sendmsgData);
             if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
             {
@@ -1938,6 +2154,7 @@ int threadUdp(int *socket_fd)
             }
             else
             {
+              if(debug_mode>0)
               printf("Send ok\n");
             }
           }
@@ -1951,13 +2168,14 @@ int threadUdp(int *socket_fd)
         }
         else if (!strcmp(name, "informResponse"))
         {
+          if(debug_mode>0)
           printf("jyb test 11 %d\n", commandId);
           commandId = GetIntByEtype(new_obj, "commandEvent");
-
+         if(debug_mode>0)
           printf("jyb test 11 %d\n", commandId);
           if (commandId == 0)
           {
-            printf("jyb test 11\n");
+            printf("jyb bbbbbb test 11\n");
             //   if (pReal->tr069state == 3)
             {
               //exeShell("/etc/init.d/freecwmpd stop&");
@@ -2016,21 +2234,65 @@ int threadUdp(int *socket_fd)
           }
           else if (strcmp(command, "inform") == 0)
           {
-            memset(tempstr, 0, 1500);
+            int indate=0,outdate=0;
+            int memtotal=0;
+            int memfreeuse=0;
+            int flashload =0;
+            int flashuse =0;
+            getDeviceSpeed(&indate,&outdate);
+            memset(tempstr, 0, 2048);
             if (external_get_action("value", "InternetGatewayDevice.LANDevice.1.Wireless.WiFiClient", &wificlient) == 0)
             {
+              if(debug_mode>0)
                 printf("jiangyibo wificlient %s\n",wificlient);
              
             }
+            uptime = getRunTime();
+//            cpuload = getCpuUsage();
+            if(!strcmp(deviceType,"IJLY_410"))
+            {
+              flashload=8*1024;
+              flashuse =5123;
+            }else if(!strcmp(deviceType,"IJLY_410"))
+            {
+              flashload=16*1024;
+              flashuse =6123;
+            }
+            else {
+              flashload=8*1024;
+              flashuse =5123;
+            }
+
+            getMemUsage(&memtotal,&memfreeuse);
             if(wificlient==NULL)
             {
-              sprintf(tempstr, informRes, deviceMac,"[]");
+              sprintf(tempstr, informRes, deviceMac,deviceMac,deviceType,HARD_VERSION,SOFT_VERSION,20,memfreeuse,memtotal,flashuse,flashload,uptime,indate,outdate,"[]");
               free(wificlient);
+              wificlient=NULL;
               httppost(tempstr, strlen(tempstr));
             }else {
-              sprintf(tempstr, informRes, deviceMac,wificlient);
+              sprintf(tempstr, informRes, deviceMac,deviceMac,deviceType,HARD_VERSION,SOFT_VERSION,20,memfreeuse,memtotal,flashuse,flashload,uptime,indate,outdate,wificlient);
               free(wificlient);
+              wificlient=NULL;
               httppost(tempstr, strlen(tempstr));
+            }
+          }
+          else if (!strcmp(command, "blackmac"))
+          {
+            memset(sendmsgData, 0, 1500);
+            returnBlackMac(sendmsgData);
+            sprintf(tempstr, GetBlackmac, deviceMac, sendmsgData);
+            httppost(tempstr, strlen(tempstr));
+          }
+          else if (!strcmp(command, "appblackmac"))
+          {
+            memset(sendmsgData, 0, 1500);
+            returnBlackMac(sendmsgData);
+            sprintf(tempstr, GetBlackmac, deviceMac, sendmsgData);
+              server_addr.sin_port = htons(ROUTER_PORT);
+            if (sendto(client_socket_fd, tempstr, strlen(tempstr), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+            {
+              printf("Send File Name Failed:");
             }
           }
           else if (strcmp(command, "reportconfig") == 0)
@@ -2048,6 +2310,7 @@ int threadUdp(int *socket_fd)
             param_p2 = exeShell(param_p1);
             length = strlen(param_p2);
             param_p3 = zstream_b64encode(param_p2, &length);
+            if(debug_mode>0)
             printf("jiangyibo %s\n", param_p3);
             sprintf(sendmsgData, CommandJson, deviceMac, param_p3);
             free(param_p3);
@@ -2058,6 +2321,7 @@ int threadUdp(int *socket_fd)
             memset(sendmsgData, 0, 1500);
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "shellcmd");
+            if(debug_mode>0)
             printf("jyb test %s\n", param_p1);
             if (param_p1 != NULL)
             {
@@ -2089,11 +2353,13 @@ int threadUdp(int *socket_fd)
           char *c = NULL;
 
           command = GetValByEtype(new_obj, "keyname");
+          if(debug_mode>0)
           printf("jiangyibo eeee 333 %s\n", command);
           if (!strcmp(command, "config"))
           {
             p1_obj = json_object_object_get(new_obj, "packet");
             jsonSetConfig(client_socket_fd, p1_obj);
+            if(debug_mode>0)
             printf("jyb test ok\n");
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
@@ -2109,13 +2375,21 @@ int threadUdp(int *socket_fd)
           else if (!strcmp(command, "download"))
           {
             memset(tempstr, 0, 1024);
-            sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", "PF-308", "pifii", "1");
-            httppost(tempstr, strlen(tempstr));
 
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "url");
             param_p2 = GetValByKey(p1_obj, "FileSize");
-            commandDownload(param_p1, param_p2);
+            checkName=  check_image_name(param_p1);
+            if(param_p1!=NULL&&checkName==1)
+            {
+                 sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "1");
+                 httppost(tempstr, strlen(tempstr));
+                 commandDownload(param_p1, param_p2);
+            }
+            else{
+                 sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "2");
+                 httppost(tempstr, strlen(tempstr));
+            }
           }
           else if (!strcmp(command, "factory"))
           {
@@ -2153,16 +2427,17 @@ int threadUdp(int *socket_fd)
           else if (!strcmp(command, "homedevice"))
           {
             memset(tempstr, 0, 1024);
-            sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", "PF-308", "pifii", "1");
+            sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", "IJLY_410", "CMTT", "1");
             httppost(tempstr, strlen(tempstr));
 
           }
           else if (!strcmp(command, "blackmac"))
           {
-                        printf("jiangyibo blackmac oooo 222\n");
+                        
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             httppost(tempstr, strlen(tempstr));
+            if(debug_mode>0)
             printf("jiangyibo blackmac oooo\n");
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "enable");
@@ -2170,7 +2445,37 @@ int threadUdp(int *socket_fd)
             param_p3 = GetValByKey(p1_obj, "blacklist");
             param_p4 = GetValByKey(p1_obj, "timespan1");
             param_p5 = GetValByKey(p1_obj, "timespan2");
-            param_p6 = GetValByKey(p1_obj, "timespan3");   
+            param_p6 = GetValByKey(p1_obj, "timespan3");  
+            if(debug_mode>0) 
+            printf("jiangyibo blackmac oooo 222 \n");
+            set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
+            sendMsgQ();
+
+          }
+          else if (!strcmp(command, "appblackmac"))
+          {
+                        
+            memset(tempstr, 0, 1024);
+            sprintf(tempstr, SetResponse, deviceMac, command, "setok");
+            if(debug_mode>0)
+            printf("jiangyibo appblackmac send %s\n",inet_ntoa(server_addr.sin_addr));
+           // server_addr.sin_addr.s_addr = inet_addr("192.168.3.68");
+            server_addr.sin_port = htons(ROUTER_PORT);
+            if (sendto(client_socket_fd, tempstr, strlen(tempstr), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+            {
+              printf("Send File Name Failed:");
+            }
+            if(debug_mode>0)
+            printf("jiangyibo blackmac oooo\n");
+            p1_obj = GetValByEdata(new_obj, "packet");
+            param_p1 = GetValByKey(p1_obj, "enable");
+            param_p2 = GetValByKey(p1_obj, "weekdays");            
+            param_p3 = GetValByKey(p1_obj, "blacklist");
+            param_p4 = GetValByKey(p1_obj, "timespan1");
+            param_p5 = GetValByKey(p1_obj, "timespan2");
+            param_p6 = GetValByKey(p1_obj, "timespan3");  
+            if(debug_mode>0) 
+            printf("jiangyibo blackmac oooo 222 %s mmm %s jiang\n",param_p5,param_p6);
             set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
             sendMsgQ();
 
@@ -2195,12 +2500,68 @@ int threadUdp(int *socket_fd)
   }
 }
 
+int get_gw_ip(char *eth, char *ipaddr)
+{
+  int sock_fd;
+  struct sockaddr_in my_addr;
+  struct ifreq ifr;
+
+  /**/ /* Get socket file descriptor */
+  if ((sock_fd = socket(PF_INET, SOCK_DGRAM, 0)) == -1)
+  {
+    return 0;
+  }
+
+  /**/ /* Get IP Address */
+  strncpy(ifr.ifr_name, eth, IF_NAMESIZE);
+  ifr.ifr_name[IFNAMSIZ - 1] = '/0';
+
+  if (ioctl(sock_fd, SIOCGIFADDR, &ifr) < 0)
+  {
+    
+    return 0;
+  }
+
+  memcpy(&my_addr, &ifr.ifr_addr, sizeof(my_addr));
+  strcpy(ipaddr, inet_ntoa(my_addr.sin_addr));
+  close(sock_fd);
+  return 1;
+}
+
+int setnameserver(int *value, char *NET_IP)
+{
+  //获取联网状态
+  struct hostent *host;
+  int inaddr = 1;
+  struct in_addr *ipaddr;
+  /*判断是主机名还是ip地址*/
+  inaddr = inet_addr(NET_IP);
+  if (inaddr == INADDR_NONE)
+  {
+    if ((host = gethostbyname(NET_IP)) == NULL) /*是主机名*/
+    {
+      printf("dns chucuo\n");
+      *value=inet_addr("113.98.195.201");
+      return 0;
+    }
+    ipaddr = (struct in_addr *)host->h_addr;
+    *value = (ipaddr->s_addr);
+  }
+  else /*是ip地址*/
+  {
+    
+    *value = inaddr;
+  }
+  return 1;
+}
+
 int main(int argc, char *argv[])
 {
   char infomsg[1500];
   char commandkey[] = "inform";
   char sendData[1500];
   char strhomeState[1500];
+  char wanIpaddr[32];
       int uptime = 0;
       int cpuload = 0;
   int length;
@@ -2210,7 +2571,12 @@ int main(int argc, char *argv[])
   int ret;
   pthread_t id1, id2;
 
-  sigInit();
+  if(argc >= 2)
+  {
+    debug_mode=1;
+  }
+
+ // sigInit();
   read_mac();
   initHomeDevice();
   pthread_mutex_init(&mutex,NULL); 
@@ -2220,6 +2586,7 @@ int main(int argc, char *argv[])
   getFileData(infomsg, "inform.json");
   getFileData(informRes, "informResponse.json");
 
+  if(debug_mode>0)
   printf("send ok tit\n");
 
   int id = 0;
@@ -2275,7 +2642,7 @@ int main(int argc, char *argv[])
   /* 绑定 */
   if (-1 == (bind(client_socket_fd, (struct sockaddr *)&client_addr, sizeof(client_addr))))
   {
-    printf("Server Bind \n");
+    printf("Server Bind error\n");
   }
 
   struct timeval timeout = {5, 0};
@@ -2299,6 +2666,7 @@ int main(int argc, char *argv[])
   int looptimes = 10;
   int homeOrRoute = 0;
   char *wificlient=NULL;
+  int dns_ok = 1;
 
     c = uci_alloc_context();
     //   printf("jiangyibo wireless 22\n");
@@ -2323,10 +2691,9 @@ int main(int argc, char *argv[])
     {
       looptimes = 0;
       getPortState(pReal->portstate);
-      cpuload = getCpuUsage();
-      pReal->memload = getMemUsage();
+
       getDeviceSpeed(&pReal->upflow, &pReal->downflow);
-      uptime = getRunTime();
+      uptime = 86886;
       pReal->cputype = 1;
       getConnectNum(&pReal->connectnum);
     }
@@ -2336,34 +2703,39 @@ int main(int argc, char *argv[])
     memset(sendData, 0, 1500);
 
 
-    server_addr.sin_addr.s_addr = inet_addr(reportServerIp);
-
+    dns_ok=  setnameserver(&(server_addr.sin_addr.s_addr),reportServerIp);
+  //  server_addr.sin_addr.s_addr= inet_addr(reportServerIp);
     server_addr.sin_port = htons(atoi(reportServerPort));
-
+    if(debug_mode>0)
     printf("jiangyibo report port %s %s\n",reportServerIp,reportServerPort);
 
+    if (dns_ok == 1)
+    {
+      if (homeOrRoute % 2 == 0)
+      {
+        get_gw_ip("eth0.2", wanIpaddr);
 
-    
-    if (homeOrRoute % 2 == 0)
-    {
-      sprintf(sendData, infomsg, deviceMac, commandkey, deviceMac,HARD_VERSION,SOFT_VERSION, cpuload,uptime);
-      printf("send ok\n%s\n", sendData);
-      if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
-      {
-        printf("Send File Name Failed:");
-        //exit(1);
+        sprintf(sendData, infomsg,  deviceMac, commandkey, deviceMac,deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr);
+        if (debug_mode > 0)
+          printf("send ok\n%s\n", sendData);
+        if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+        {
+          printf("Send File Name Failed:");
+          //exit(1);
+        }
       }
-    }
-    else
-    {
-      memset(strhomeState, 0, 1500);
-      GetHomeDevice(strhomeState);
-      sprintf(sendData, HomeDeviceState, deviceMacFu, strhomeState);
-      printf("send ok\n%s\n", sendData);
-      if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+      else
       {
-        printf("Send File Name Failed:");
-        //exit(1);
+        memset(strhomeState, 0, 1500);
+        GetHomeDevice(strhomeState);
+        sprintf(sendData, HomeDeviceState, deviceMacFu, strhomeState);
+        if (debug_mode > 0)
+          printf("send ok\n%s\n", sendData);
+        if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+        {
+          printf("Send File Name Failed:");
+          //exit(1);
+        }
       }
     }
     /* 从服务器接收数据，并写入文件 */

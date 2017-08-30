@@ -11,7 +11,35 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+
+
+
 #include "httppost.h"
+
+int postnameserver(int *value, char *NET_IP)
+{
+  //获取联网状态
+  struct hostent *host;
+  int inaddr = 1;
+  struct in_addr *ipaddr;
+  /*判断是主机名还是ip地址*/
+  if ((inaddr = inet_addr(NET_IP) )== INADDR_NONE)
+  {
+    if ((host = gethostbyname(NET_IP)) == NULL) /*是主机名*/
+    {
+      printf("post dns chucuo\n");
+      return 0;
+    }
+    ipaddr = (struct in_addr *)host->h_addr;
+    *value = (ipaddr->s_addr);
+  }
+  else /*是ip地址*/
+  {
+    *value = inaddr;
+  }
+  return 1;
+}
 
 int httppost(char *bufMsg, int length)
 {
@@ -40,14 +68,15 @@ int httppost(char *bufMsg, int length)
         servaddr.sin_port = htons(postPort);
 
         struct timeval timeout = {2, 0};
-  //      setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(struct timeval));
-  //      setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
+        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(struct timeval));
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(struct timeval));
 
-        if (inet_pton(AF_INET, httpPostServerIp , &servaddr.sin_addr) <= 0)
+  //      if (inet_pton(AF_INET, httpPostServerIp , &servaddr.sin_addr) <= 0)
+        if(postnameserver(&(servaddr.sin_addr.s_addr),httpPostServerIp)==0)
         {
                 printf("创建网络连接失败,本线程即将终止--inet_pton error!\n");
                 return -1;
-        };
+        }
 
         if (connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
         {
@@ -66,7 +95,7 @@ int httppost(char *bufMsg, int length)
         strcat(str1, "POST ");
         strcat(str1, httpPostServerPath);
         strcat(str1, " HTTP/1.1\n");
-        strcat(str1, "Host: pf.pifii.com\n");
+        strcat(str1, "Host: www.cnihome.net\n");
         strcat(str1, "Content-Type: application/json;charset=utf-8\n");
         strcat(str1, "Content-Length: ");
         strcat(str1, str);
@@ -87,20 +116,27 @@ int httppost(char *bufMsg, int length)
                 printf("消息发送成功，共发送了%d个字节！\n\n", ret);
         }
         free(str);
-        memset(buf, 0, 1024);
 
-        if ((recvLeng = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&server_addr, &server_addr_length)) > 0)
+        if (debug_mode > 0)
         {
-                printf("消息接受成功，共收了%d个字节！\n\n", recvLeng);
-                close(sockfd);
-                return 1;
-        }
-        else
-        {
-                close(sockfd);
-                return -1;
-        }
+                memset(buf, 0, 1024);
 
+                if ((recvLeng = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&server_addr, &server_addr_length)) > 0)
+                {
+                        printf("消息接受成功，共收了%d个字节！\n\n", recvLeng);
+                        close(sockfd);
+                        return 1;
+                }
+                else
+                {
+                        close(sockfd);
+                        return -1;
+                }
+        }else {
+
+        close(sockfd);
+        return 1;
+        }
         /*
 
         FD_ZERO(&t_set1);

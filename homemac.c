@@ -271,7 +271,7 @@ int recvMsgQ()
     if (msgrcv(msgid, (void *)&data, MAX_TEXT, msgtype, 0) == -1)
     {
       fprintf(stderr, "msgrcv failed with errno: %d\n", errno);
-      exit(EXIT_FAILURE);
+     
     }
     pthread_mutex_lock(&mutex); //锁定互
 
@@ -560,6 +560,10 @@ int middle_time(char *timespan, int hour, int min)
   int s_min;
   int t_hour;
   int t_min;
+
+  int jitime1=0;
+  int jitime2=0;
+  int jitime3=0;
   if (strlen(timespan) < 8)
   {
     return 0;
@@ -579,24 +583,23 @@ int middle_time(char *timespan, int hour, int min)
   t_hour = atoi(thour);
   t_min = atoi(tmin);
 
-  if (hour > s_hour && hour < t_hour)
+  jitime1 = hour*60 + min;
+  jitime2 = s_hour*60 +s_min;
+  jitime3 = t_hour*60 +t_min;
+
+  if (jitime1>=jitime2&&jitime1<jitime3)
   {
     return 1;
   }
-  else if (hour == s_hour && min > s_min)
-  {
-    return 1;
-  }
-   else if (hour == t_hour && min < t_min)
-  {
-    return 1;
-  }
+  else{
   return 0;
+  }
 }
 char black_mac[512];
 int saveEnable = 0;
+int firstEnable = 0;
 
-void black_mac_table(char *weekdays, char *blacklist, char *timespan1, char *timespan2, char *timespan3, char *value)
+void black_mac_table(char *enable, char *weekdays, char *blacklist, char *timespan1, char *timespan2, char *timespan3, char *value)
 {
   int index = 0;
   time_t timer;
@@ -606,57 +609,85 @@ void black_mac_table(char *weekdays, char *blacklist, char *timespan1, char *tim
   int enable1 = 0;
   int enable2 = 0;
   int enable3 = 0;
+  char weekenable;
   printf("exec mac black 333\n");
   //  for (index = 0; index < 7; index++)
-
-  if (weekdays[tblock->tm_wday] == '1')
+  if (enable[0] == '1')
   {
-
-    printf("exec mac black 333 4444\n");
-    enable1 = middle_time(timespan1, tblock->tm_hour, tblock->tm_min);
-    enable2 = middle_time(timespan2, tblock->tm_hour, tblock->tm_min);
-    enable3 = middle_time(timespan3, tblock->tm_hour, tblock->tm_min);
-    if (enable1 == 1 || enable2 == 1 || enable3 == 1)
+    firstEnable = 0;
+    if (tblock->tm_wday == 0)
     {
-      if (!strcmp(black_mac, blacklist))
+      weekenable = weekdays[6];
+    }
+    else
+    {
+      weekenable = weekdays[tblock->tm_wday - 1];
+    }
+
+    if (weekenable == '1')
+    {
+
+      printf("exec mac black 333 4444\n");
+      enable1 = middle_time(timespan1, tblock->tm_hour, tblock->tm_min);
+      enable2 = middle_time(timespan2, tblock->tm_hour, tblock->tm_min);
+      enable3 = middle_time(timespan3, tblock->tm_hour, tblock->tm_min);
+      if (enable1 == 1 || enable2 == 1 || enable3 == 1)
       {
-        if (saveEnable == 1)
+        if (!strcmp(black_mac, blacklist))
         {
-          printf("dang qian zhuang tai bu xu yao  zhi xing exec mac black %s\n", black_mac);
+          if (saveEnable == 1)
+          {
+            printf("已经保存状态，不要写表 %s\n", black_mac);
+          }
+          else
+          {
+            system("blackmac ok&");
+            printf("写表成功 %s\n", black_mac);
+          }
         }
         else
         {
-          printf("exec mac black %s\n", black_mac);
+          strcpy(black_mac, blacklist);
+          system("blackmac ok&");
+          printf("初次写表\n");
         }
+        saveEnable = 1;
+        return;
       }
       else
       {
-        strcpy(black_mac, blacklist);
-        printf("exec mac black 222\n");
+        if (saveEnable == 1)
+        {
+          system("blackmac &");
+          printf("exec mac 清空表\n");
+        }
+        else
+        {
+          printf("不需要 清空表\n");
+        }
+        saveEnable = 0;
       }
-      saveEnable = 1;
-      return;
     }
     else
     {
       if (saveEnable == 1)
       {
-
+        system("blackmac &");
         printf("exec mac 清空表\n");
+        saveEnable = 0;
       }
-      else
-      {
-        printf("meiyou qi dong bu xu yao  zhi xing exec mac 清空表\n");
-      }
-      saveEnable = 0;
     }
   }
   else
   {
-    if (saveEnable == 1)
+    saveEnable=0;
+    if (firstEnable == 0)
     {
+      system("blackmac &");
       printf("exec mac 清空表\n");
-      saveEnable = 0;
+      firstEnable = 1;
+    } else {
+
     }
   }
   return;
@@ -725,7 +756,7 @@ int main(int argc, char *argv[])
       readUciConfig = 0;
     }
 
-    black_mac_table(weekdays, blacklist, timespan1, timespan2, timespan3, black_mac);
+    black_mac_table(enable,weekdays, blacklist, timespan1, timespan2, timespan3, black_mac);
 
     pthread_mutex_unlock(&mutex); //打开互斥锁
     temp = 2;
