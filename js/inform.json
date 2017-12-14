@@ -18,6 +18,7 @@
         "client_speed": "1561071965 1175873324",
         "wan_current_ip_addr": "%s",
         "work_mode": "AP",
+        "register": "%d",
         "WiFiClient": [],
         "portstate": {
             "port5": 1,

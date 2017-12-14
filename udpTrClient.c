@@ -82,6 +82,10 @@ static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
 				\"keyname\": \"getvalue\",\"packet\": {\"UpTime\": \"sss\",\"wan_type\": \"sss\"}}"
 #define HomeResponse "{\"sid\": \"%s\",\"id\": \"%s\",\"ver\": \"%s\",\
 				\"cmdtype\": \"2\",\"result\":\"ok\", \"errordes\":\"\"}"
+#define HomeSwitchOn "{\"sid\": \"1\",\"id\": \"%s\",\"ver\": \"%s\",\
+				\"cmdtype\": \"4099\",\"subcmd\": 1,\"value\": 0}" 
+#define HomeSwitchOff "{\"sid\": \"1\",\"id\": \"%s\",\"ver\": \"%s\",\
+				\"cmdtype\": \"4099\",\"subcmd\": \"1\",\"value\": 1}"                
 #define HomeDeviceState "{\"name\": \"update_smartdevs\", \"serialnumber\": \"%s\", \"devs\":[%s]}"
 
 char informRes[1500];
@@ -205,7 +209,7 @@ int external_get_action(char *action, char *name, char **value)
   char *c = NULL;
 
  if(debug_mode>0)
-  printf("jiangyibo action %s %s\n", action, name);
+  printf("tz action %s %s\n", action, name);
 
   if (pipe(pfds) < 0)
     return -1;
@@ -257,7 +261,7 @@ int external_get_action(char *action, char *name, char **value)
     {
       t = asprintf(&c, "%s%.*s", *value, (int)rxed, buffer);
       if(debug_mode>0)
-      printf("jiangyibo get kkkkk%s\n", c);
+      printf("tz get kkkkk%s\n", c);
     }
     else
     {
@@ -267,10 +271,10 @@ int external_get_action(char *action, char *name, char **value)
       goto done;
 */   
      if(debug_mode>0)
-      printf("jiangyibo get %s\n", c);
+      printf("tz get %s\n", c);
     }
     if(debug_mode>0)
-    printf("jiangyibo get kkkkk sss %d %s\n",t, c);
+    printf("tz get kkkkk sss %d %s\n",t, c);
     if (t == -1)
       goto error;
 
@@ -449,12 +453,13 @@ int AddHomeDevice(char *mac,unsigned int addr,char *devtype,char *statstr)
   time_t uptime;
   uptime = time(NULL);
 
-  pthread_mutex_lock(&mutex);//锁定互斥锁  
+ // pthread_mutex_lock(&mutex);//锁定互斥锁  
   for (i = 0; i < 10; i++)
   {
 
     if (homeDev[i].enable == 0)
     {
+      printf("jiangyibo ok 11\n");
       memcpy(homeDev[i].mac, mac,17);
       homeDev[i].addr = addr;
       if(devtype!=NULL)
@@ -465,10 +470,13 @@ int AddHomeDevice(char *mac,unsigned int addr,char *devtype,char *statstr)
       {
          strcpy(homeDev[i].statstr,statstr);
       }
+      printf("jiangyibo ok 11 222\n");
       homeDev[i].uptime = uptime;
       homeDev[i].enable = 1;
-      pthread_mutex_unlock(&mutex);//打开互斥锁 
-      return 1;
+      
+//      pthread_mutex_unlock(&mutex);//打开互斥锁 
+      printf("jiangyibo ok 11 222\n");
+      break;
     }
     else if (!strcmp(mac, homeDev[i].mac))
     {
@@ -491,11 +499,11 @@ int AddHomeDevice(char *mac,unsigned int addr,char *devtype,char *statstr)
          strcpy(homeDev[i].statstr,statstr);
       }
 
-      pthread_mutex_unlock(&mutex);//打开互斥锁 
-      return 1;
+ //     pthread_mutex_unlock(&mutex);//打开互斥锁 
+      break;
     }
   }
-  pthread_mutex_unlock(&mutex);//打开互斥锁 
+//  pthread_mutex_unlock(&mutex);//打开互斥锁 
   return 0;
 }
 
@@ -627,11 +635,32 @@ char *GetValByEtype(json_object *jobj, const char *sname)
     case json_type_int:
       return json_object_get_int(pval);
 
+
     default:
       return NULL;
     }
   }
   return NULL;
+}
+
+boolean GetBoolByEtype(json_object *jobj, const char *sname)
+{
+  json_object *pval = NULL;
+  enum json_type type;
+  pval = json_object_object_get(jobj, sname);
+  if (NULL != pval)
+  {
+    type = json_object_get_type(pval);
+    switch (type)
+    {
+    case json_type_boolean:
+      return json_object_get_boolean(pval);      
+
+    default:
+      return 0;
+    }
+  }
+  return 0;
 }
 
 int GetIntByEtype(json_object *jobj, const char *sname)
@@ -776,7 +805,7 @@ int jsonGetConfig(SOCKET s, json_object *config)
       break;
     }
     if(debug_mode>0)
-    printf("jiangyibo sfdsfsa mabi\n");
+    printf("tz sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
     {
@@ -886,11 +915,11 @@ int jsonGetConfig(SOCKET s, json_object *config)
   snprintf(sendbuf,sizeof(sendbuf), GetResponse, deviceMac, kvbuf);
 
 if(debug_mode>0)
-  printf("jiangyibo send mmmmmm %s\n", sendbuf);
+  printf("tz send mmmmmm %s\n", sendbuf);
 
   httppost(sendbuf, strlen(sendbuf));
   if(debug_mode>0)
-  printf("jiangyibo send mmmmmm  333\n");
+  printf("tz send mmmmmm  333\n");
   // rc = send(s, sendbuf, strlen(sendbuf), 0);
 
   return rc;
@@ -939,7 +968,7 @@ int jsonSetConfig(SOCKET s, json_object *config)
       break;
     }
     if(debug_mode>0)
-    printf("jiangyibo sfdsfsa mabi\n");
+    printf("tz sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
     {
@@ -981,7 +1010,7 @@ int jsonSetConfig(SOCKET s, json_object *config)
   }
   external_set_action_execute();
   if(debug_mode>0)
-  printf("jiangyibo exec set ok\n");
+  printf("tz exec set ok\n");
   return rc;
 }
 
@@ -1200,7 +1229,7 @@ int getRunTime()
   {
   }
   pclose(fp);
-  //  printf("jiangyibo getRunTime %d\n", timeBuf);
+  //  printf("tz getRunTime %d\n", timeBuf);
   return timeBuf;
 }
 
@@ -1263,7 +1292,7 @@ int getDeviceSpeed(int *total, int *used)
     return 0;
   }
   fscanf(fp, "%lu %lu", total, used);
-  //  printf("jiangyibo getRunTime %d %d\n", *total, *used);
+  //  printf("tz getRunTime %d %d\n", *total, *used);
   pclose(fp);
   return 0;
 }
@@ -1282,7 +1311,7 @@ int getConnectNum(char *conn)
     return 0;
   }
   fscanf(fp, "%lu", &total);
-  //  printf("jiangyibo getConnectNum %d\n", total);
+  //  printf("tz getConnectNum %d\n", total);
   pclose(fp);
   *conn = (char)total;
   return 0;
@@ -1488,7 +1517,7 @@ void set_pifii_uci(char *enable,char *weekdays,char *blacklist,char *timespan1,c
   rc= uci_set(ctx, &ptrO);    
            //写入配置 
 if(debug_mode>0)           
- printf("jiangyibo timespan2 %s option=%s %d\n",timespan2,option,rc); 
+ printf("tz timespan2 %s option=%s %d\n",timespan2,option,rc); 
   uci_commit(ctx, &ptrO.p, false); //提交保存更改
   uci_unload(ctx, ptrO.p);         //卸载包
 
@@ -1549,7 +1578,7 @@ float wirelessConfig(struct uci_context *c, WirelessDates *pWireless)
     {
     }
   }
-  // printf("jiangyibo wireless get \n");
+  // printf("tz wireless get \n");
   sprintf(buf, "wireless.@wifi-iface[0].key");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
@@ -1599,7 +1628,7 @@ float wirelessConfig(struct uci_context *c, WirelessDates *pWireless)
       }
       else
       {
-        //    printf("jiangyibo wireless get 223388 %d \n", p.o);
+        //    printf("tz wireless get 223388 %d \n", p.o);
         pWireless->wifidata[0].channel = atoi(p.o->v.string);
       }
     }
@@ -1607,7 +1636,7 @@ float wirelessConfig(struct uci_context *c, WirelessDates *pWireless)
   sprintf(buf, "wireless.@wifi-iface[0].portel");
   if (uci_lookup_ptr(c, &p, buf, true))
   {
-    //   printf("jiangyibo wireless get 23\n");
+    //   printf("tz wireless get 23\n");
     pWireless->wifidata[0].portel = 0;
   }
   else
@@ -1637,7 +1666,7 @@ float wirelessConfig(struct uci_context *c, WirelessDates *pWireless)
       pWireless->wifidata[0].disabled = 0;
     }
   }
-  // printf("jiangyibo wireless get 3\n");
+  // printf("tz wireless get 3\n");
 }
 
 float networkConfig(struct uci_context *c, NetworkDate *pNet)
@@ -1971,12 +2000,12 @@ int threadHome()
     memset(recvData, 0, 4096);
     if(recvfrom(server_socket_fd, recvData, sizeof(recvData),0,(struct sockaddr*)&client_addr, &client_addr_length) == -1) 
     { 
-    printf("jiangyibo 888%s\n", recvData);
+    printf("tz 888%s\n", recvData);
     //     new_obj = json_tokener_parse(TestJson);
     new_obj = json_tokener_parse(recvData);
     if (is_error(new_obj))
     {
-      printf("jiangyibo error para%s\n");
+      printf("tz error para%s\n");
       // rc = send(s, ErrorJson, sizeof(ErrorJson), 0);
     }
     else
@@ -1987,7 +2016,7 @@ int threadHome()
       hver = GetValByEtype(new_obj, "ver");
       hcmdtype = GetValByEtype(new_obj, "cmdtype");
       //typeE = GetValByEtype(new_obj, "params");
-      printf("jiangyibo name %s\n", name);
+      printf("tz name %s\n", name);
       if (hsid == NULL||hid==NULL||hver==NULL||hcmdtype==NULL)
       {
         
@@ -2072,7 +2101,9 @@ int threadUdp(int *socket_fd)
 
   char *param_p1, *param_p2, *param_p3, *param_p4, *param_p5 = NULL,*param_p6;
 
-  char *hsid, *hid, *hver, *hcmdtype,*hdevtype,*hstatstr;
+  char *hsid, *hid, *hver, *hcmdtype,*hdevtype;
+
+  int hstatstr;
 
   int param_int;
   int checkName;
@@ -2104,15 +2135,15 @@ int threadUdp(int *socket_fd)
     if ((len = recvfrom(client_socket_fd, recvData, sizeof(recvData), 0, (struct sockaddr *)&server_addr, &server_addr_length)) > 0)
     {
       if(debug_mode>0)
-      printf("jiangyibo recv%s\n", recvData);
+      printf("tz recv%s\n", recvData);
       //     new_obj = json_tokener_parse(TestJson);
       new_obj = json_tokener_parse(recvData);
       if(debug_mode>0)
-      printf("jiangyibo recv 333%s\n", recvData);
+      printf("tz recv 333%s\n", recvData);
       if (new_obj==NULL||is_error(new_obj))
       {
         if(debug_mode>0)
-        printf("jiangyibo error para%s\n");
+        printf("tz error para%s\n");
         // rc = send(s, ErrorJson, sizeof(ErrorJson), 0);
       }
       else
@@ -2123,15 +2154,17 @@ int threadUdp(int *socket_fd)
 
         //typeE = GetValByEtype(new_obj, "params");
         if(debug_mode>0)
-        printf("jiangyibo recv name %s\n", name);
+        printf("tz recv name smartdevice\n");
         if (name == NULL)
         {
           //rc = send(client_socket_fd, ErrorJson, sizeof(ErrorJson), 0);
           //发送  的json 错误
+           printf("tz recv name smartdevice 22\n");
           hsid = GetValByEtype(new_obj, "sid");
           hid = GetValByEtype(new_obj, "id");
           hver = GetValByEtype(new_obj, "ver");
           hcmdtype = GetValByEtype(new_obj, "cmdtype");
+          printf("tz recv name smartdevice3 44 %d\n",hsid);
           if (hsid == NULL || hid == NULL || hver == NULL || hcmdtype == NULL)
           {
 
@@ -2140,14 +2173,21 @@ int threadUdp(int *socket_fd)
           else if (!strcmp(hcmdtype, "4097"))
           {
             //
-            hdevtype = GetValByEtype(new_obj, "devtype");
-            hstatstr = GetValByEtype(new_obj, "statstr");
-            AddHomeDevice(hid, server_addr.sin_addr.s_addr,hdevtype,hstatstr);
+             printf("tz recv name smartdevice3333\n");
+   //         hdevtype = GetValByEtype(new_obj, "devtype");
+    //        hstatstr = GetBoolByEtype(new_obj, "devicestate");
+            
+            
+       //     AddHomeDevice(hid, server_addr.sin_addr.s_addr,hdevtype,"1");
+            
             memset(sendmsgData, 0, 1500);
-            sprintf(sendmsgData, HomeResponse, hsid, hid, hver);
+            sprintf(sendmsgData, HomeSwitchOn, hid, hver);
+          //  sprintf(sendmsgData, HomeResponse, "11", "22", "1");
+            printf("tz recv name ok %s\n",sendmsgData);
             server_addr.sin_port = htons(HOMEDEV_PORT);
+          //  printf("tz recv name smartdevice3 44 %s %s %s\n",hsid,hid,hver);
             if(debug_mode>0)
-             printf("jiangyibo homedevice %s\n",sendmsgData);
+             printf("tz homedevice %s\n",sendmsgData);
             if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
             {
               printf("Send File Name Failed:");
@@ -2244,7 +2284,7 @@ int threadUdp(int *socket_fd)
             if (external_get_action("value", "InternetGatewayDevice.LANDevice.1.Wireless.WiFiClient", &wificlient) == 0)
             {
               if(debug_mode>0)
-                printf("jiangyibo wificlient %s\n",wificlient);
+                printf("tz wificlient %s\n",wificlient);
              
             }
             uptime = getRunTime();
@@ -2311,7 +2351,7 @@ int threadUdp(int *socket_fd)
             length = strlen(param_p2);
             param_p3 = zstream_b64encode(param_p2, &length);
             if(debug_mode>0)
-            printf("jiangyibo %s\n", param_p3);
+            printf("tz %s\n", param_p3);
             sprintf(sendmsgData, CommandJson, deviceMac, param_p3);
             free(param_p3);
             rc = send(client_socket_fd, (char *)sendmsgData, sizeof(sendmsgData), 0);
@@ -2354,7 +2394,7 @@ int threadUdp(int *socket_fd)
 
           command = GetValByEtype(new_obj, "keyname");
           if(debug_mode>0)
-          printf("jiangyibo eeee 333 %s\n", command);
+          printf("tz eeee 333 %s\n", command);
           if (!strcmp(command, "config"))
           {
             p1_obj = json_object_object_get(new_obj, "packet");
@@ -2438,7 +2478,7 @@ int threadUdp(int *socket_fd)
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             httppost(tempstr, strlen(tempstr));
             if(debug_mode>0)
-            printf("jiangyibo blackmac oooo\n");
+            printf("tz blackmac oooo\n");
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "enable");
             param_p2 = GetValByKey(p1_obj, "weekdays");            
@@ -2447,7 +2487,7 @@ int threadUdp(int *socket_fd)
             param_p5 = GetValByKey(p1_obj, "timespan2");
             param_p6 = GetValByKey(p1_obj, "timespan3");  
             if(debug_mode>0) 
-            printf("jiangyibo blackmac oooo 222 \n");
+            printf("tz blackmac oooo 222 \n");
             set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
             sendMsgQ();
 
@@ -2458,7 +2498,7 @@ int threadUdp(int *socket_fd)
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             if(debug_mode>0)
-            printf("jiangyibo appblackmac send %s\n",inet_ntoa(server_addr.sin_addr));
+            printf("tz appblackmac send %s\n",inet_ntoa(server_addr.sin_addr));
            // server_addr.sin_addr.s_addr = inet_addr("192.168.3.68");
             server_addr.sin_port = htons(ROUTER_PORT);
             if (sendto(client_socket_fd, tempstr, strlen(tempstr), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
@@ -2466,7 +2506,7 @@ int threadUdp(int *socket_fd)
               printf("Send File Name Failed:");
             }
             if(debug_mode>0)
-            printf("jiangyibo blackmac oooo\n");
+            printf("tz blackmac oooo\n");
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "enable");
             param_p2 = GetValByKey(p1_obj, "weekdays");            
@@ -2475,7 +2515,7 @@ int threadUdp(int *socket_fd)
             param_p5 = GetValByKey(p1_obj, "timespan2");
             param_p6 = GetValByKey(p1_obj, "timespan3");  
             if(debug_mode>0) 
-            printf("jiangyibo blackmac oooo 222 %s mmm %s jiang\n",param_p5,param_p6);
+            printf("tz blackmac oooo 222 %s mmm %s jiang\n",param_p5,param_p6);
             set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
             sendMsgQ();
 
@@ -2555,6 +2595,32 @@ int setnameserver(int *value, char *NET_IP)
   return 1;
 }
 
+int getRegisterState()
+{
+    struct uci_context *c;
+      char buf[128];
+  struct uci_ptr p;
+  int value = 0;
+
+  c = uci_alloc_context();
+  sprintf(buf, "pifii.register.device_id");
+  if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
+  {
+     value = 0;
+  }
+  else
+  {
+    if (p.o != NULL)
+    {
+      value = 1;
+    }
+  }
+
+
+    uci_free_context(c);
+    return value;
+}
+
 int main(int argc, char *argv[])
 {
   char infomsg[1500];
@@ -2563,6 +2629,7 @@ int main(int argc, char *argv[])
   char strhomeState[1500];
   char wanIpaddr[32];
       int uptime = 0;
+      int registState = 0;
       int cpuload = 0;
   int length;
   int rc;
@@ -2669,11 +2736,11 @@ int main(int argc, char *argv[])
   int dns_ok = 1;
 
     c = uci_alloc_context();
-    //   printf("jiangyibo wireless 22\n");
+    //   printf("tz wireless 22\n");
     wirelessConfig(c, pWireless);
-    //   printf("jiangyibo wireless\n");
+    //   printf("tz wireless\n");
     networkConfig(c, pNet);
-    //   printf("jiangyibo net\n");
+    //   printf("tz net\n");
     initReportConfig(c);
 
     uci_free_context(c);
@@ -2682,7 +2749,7 @@ int main(int argc, char *argv[])
 
   while (1)
   {
-    //  printf("jiangyibo while\n");
+    //  printf("tz while\n");
     if (getPidByName("pidof freecwmpd") < 1)
       pReal->tr069state = 4;
     else
@@ -2707,15 +2774,18 @@ int main(int argc, char *argv[])
   //  server_addr.sin_addr.s_addr= inet_addr(reportServerIp);
     server_addr.sin_port = htons(atoi(reportServerPort));
     if(debug_mode>0)
-    printf("jiangyibo report port %s %s\n",reportServerIp,reportServerPort);
+    printf("tz report port %s %s\n",reportServerIp,reportServerPort);
 
     if (dns_ok == 1)
     {
       if (homeOrRoute % 2 == 0)
       {
         get_gw_ip("eth0.2", wanIpaddr);
-
-        sprintf(sendData, infomsg,  deviceMac, commandkey, deviceMac,deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr);
+        if(registState==0)
+        {
+          registState = getRegisterState();
+        }
+        sprintf(sendData, infomsg,  deviceMac, commandkey, deviceMac,deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr,registState);
         if (debug_mode > 0)
           printf("send ok\n%s\n", sendData);
         if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
@@ -2746,14 +2816,6 @@ int main(int argc, char *argv[])
   }
 
   printf("cucuo \n");
-  /*
-  alarm(30);
-
-  while (1)
-  {	
-    pause();
-  }
-*/
   close(client_socket_fd);
   return 0;
 }
