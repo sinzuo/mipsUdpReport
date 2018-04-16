@@ -22,7 +22,7 @@
 #include <net/if_arp.h>
 #include <sys/wait.h>
 
-#include <sys/ioctl.h> 
+#include <sys/ioctl.h>
 
 #include <sys/types.h>
 #include <sys/ipc.h>
@@ -31,7 +31,6 @@
 #include "uci.h"
 #include "json.h"
 #include "httppost.h"
-
 
 #define ROUTER_PORT 8880
 #define HOMEDEV_PORT 8880
@@ -46,15 +45,15 @@
 #define APP_VERSION 1
 #define SERVER_IP "192.168.3.68" //tz.pifii.com
 #define SERVER_PORT "8880"
-#define HTTPPOST_IP "192.168.3.68"//tz.pifii.com
+#define HTTPPOST_IP "192.168.3.68" //tz.pifii.com
 #define HTTPPOST_PORT "8082"
 #define HTTPPOST_PATH "/wifi_home_gx/acsjson"
 #define HARD_VERSION "v2.1.8"
-#define SOFT_VERSION "v2.1.17"
+#define SOFT_VERSION "v2.1.29"
 #define DEVICE_TYPE_E "IJLY_410"
+#define SOFT_VERSION_SHELL "cat /etc/sysinfo.conf |grep soft_version|cut -c 14-"
 
 int debug_mode = 0;
-
 
 static char *fc_script = "/usr/sbin/freecwmp";
 static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
@@ -75,21 +74,22 @@ static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
 #define GetResponse "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
 				\"keyname\": \"config\",\"packet\": {%s}}"
 #define GetReport "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
-				\"keyname\": \"reportconfig\",\"packet\": {%s}}"  
+				\"keyname\": \"reportconfig\",\"packet\": {%s}}"
 #define GetBlackmac "{\"name\": \"getResponse\",\"version\": \"1.0.0\",\"serialnumber\": \"%s\",\
-				\"keyname\": \"blackmac\",\"packet\": {%s}}"                
+				\"keyname\": \"blackmac\",\"packet\": {%s}}"
 #define TestJson "{\"name\": \"get\",\"version\": \"1.0.0\",\"serialnumber\": \"112233445566\",\
 				\"keyname\": \"getvalue\",\"packet\": {\"UpTime\": \"sss\",\"wan_type\": \"sss\"}}"
 #define HomeResponse "{\"sid\": \"%s\",\"id\": \"%s\",\"ver\": \"%s\",\
-				\"cmdtype\": \"2\",\"result\":\"ok\", \"errordes\":\"\"}"
+				\"cmdtype\": \"2\",\"result\":\"ok\", \"errordes\":\"\",\"date\":\"2017-01-01\",\"time\":\"01-02-03\",\"week\":\"2\"}"
+#define HomeRespApp "{\"Factory\": \"pifii_smart_ok\"}"
 #define HomeSwitchOn "{\"sid\": \"1\",\"id\": \"%s\",\"ver\": \"%s\",\
-				\"cmdtype\": \"4099\",\"subcmd\": 1,\"value\": 0}" 
+				\"cmdtype\": \"4099\",\"subcmd\": 1,\"value\": 0}"
 #define HomeSwitchOff "{\"sid\": \"1\",\"id\": \"%s\",\"ver\": \"%s\",\
-				\"cmdtype\": \"4099\",\"subcmd\": \"1\",\"value\": 1}"                
-#define HomeDeviceState "{\"name\": \"update_smartdevs\", \"serialnumber\": \"%s\", \"devs\":[%s]}"
+				\"cmdtype\": \"4099\",\"subcmd\": 1,\"value\": 1}"
+#define HomeDeviceState "{\"name\": \"update_smartdevs\", \"ProductClass\": \"%s\",\"serialnumber\": \"%s\", \"devs\":[%s]}"
 
 char informRes[1500];
-pthread_mutex_t mutex;  
+pthread_mutex_t mutex;
 char reportServerIp[32];
 char reportServerPort[32];
 
@@ -97,6 +97,7 @@ char httpPostServerIp[32];
 char httpPostServerPort[32];
 char httpPostServerPath[32];
 char deviceType[32];
+char deviceVer[32];
 
 #define FREE(x) \
   do            \
@@ -208,8 +209,8 @@ int external_get_action(char *action, char *name, char **value)
   int pfds[2];
   char *c = NULL;
 
- if(debug_mode>0)
-  printf("tz action %s %s\n", action, name);
+  if (debug_mode > 0)
+    printf("tz action %s %s\n", action, name);
 
   if (pipe(pfds) < 0)
     return -1;
@@ -260,8 +261,8 @@ int external_get_action(char *action, char *name, char **value)
     if (*value)
     {
       t = asprintf(&c, "%s%.*s", *value, (int)rxed, buffer);
-      if(debug_mode>0)
-      printf("tz get kkkkk%s\n", c);
+      if (debug_mode > 0)
+        printf("tz get kkkkk%s\n", c);
     }
     else
     {
@@ -269,12 +270,12 @@ int external_get_action(char *action, char *name, char **value)
       t = asprintf(&c, "%.*s", (int)rxed, buffer);
       /*      *value = NULL;
       goto done;
-*/   
-     if(debug_mode>0)
-      printf("tz get %s\n", c);
+*/
+      if (debug_mode > 0)
+        printf("tz get %s\n", c);
     }
-    if(debug_mode>0)
-    printf("tz get kkkkk sss %d %s\n",t, c);
+    if (debug_mode > 0)
+      printf("tz get kkkkk sss %d %s\n", t, c);
     if (t == -1)
       goto error;
 
@@ -433,9 +434,10 @@ typedef struct homedevice
 {
   unsigned int addr;
   int uptime;
-  int enable;  
+  int enable;
   char mac[18];
   char devtype[8];
+  char ver[16];  
   char statstr[64];
 } HomeDevice;
 
@@ -447,36 +449,38 @@ int initHomeDevice()
   return 1;
 }
 
-int AddHomeDevice(char *mac,unsigned int addr,char *devtype,char *statstr)
+int AddHomeDevice(char *mac, unsigned int addr, char *devtype,char *ver, char *statstr)
 {
-  int i=0;
+  int i = 0;
   time_t uptime;
   uptime = time(NULL);
 
- // pthread_mutex_lock(&mutex);//锁定互斥锁  
+  pthread_mutex_lock(&mutex); //锁定互斥锁
   for (i = 0; i < 10; i++)
   {
 
     if (homeDev[i].enable == 0)
     {
-      printf("jiangyibo ok 11\n");
-      memcpy(homeDev[i].mac, mac,17);
+
+      memcpy(homeDev[i].mac, mac, 17);
       homeDev[i].addr = addr;
-      if(devtype!=NULL)
+      if (devtype != NULL)
       {
-         strcpy(homeDev[i].devtype,devtype);
+        strcpy(homeDev[i].devtype, devtype);
       }
-      if(statstr!=NULL)
+      if (statstr != NULL)
       {
-         strcpy(homeDev[i].statstr,statstr);
+        strcpy(homeDev[i].statstr, statstr);
       }
-      printf("jiangyibo ok 11 222\n");
+      if (ver != NULL)
+      {
+        strcpy(homeDev[i].ver, ver);
+      }
       homeDev[i].uptime = uptime;
       homeDev[i].enable = 1;
-      
-//      pthread_mutex_unlock(&mutex);//打开互斥锁 
-      printf("jiangyibo ok 11 222\n");
-      break;
+
+      pthread_mutex_unlock(&mutex); //打开互斥锁
+      return 1;
     }
     else if (!strcmp(mac, homeDev[i].mac))
     {
@@ -490,20 +494,20 @@ int AddHomeDevice(char *mac,unsigned int addr,char *devtype,char *statstr)
         homeDev[i].uptime = uptime;
       }
 
-      if(devtype!=NULL)
+      if (devtype != NULL)
       {
-         strcpy(homeDev[i].devtype,devtype);
+        strcpy(homeDev[i].devtype, devtype);
       }
-      if(statstr!=NULL)
+      if (statstr != NULL)
       {
-         strcpy(homeDev[i].statstr,statstr);
+        strcpy(homeDev[i].statstr, statstr);
       }
 
- //     pthread_mutex_unlock(&mutex);//打开互斥锁 
-      break;
+      pthread_mutex_unlock(&mutex); //打开互斥锁
+      return 1;
     }
   }
-//  pthread_mutex_unlock(&mutex);//打开互斥锁 
+  pthread_mutex_unlock(&mutex); //打开互斥锁
   return 0;
 }
 
@@ -514,7 +518,7 @@ int GetHomeDevice(char *value)
   time_t lt;
   lt = time(NULL);
   char tempstr[128];
-    pthread_mutex_lock(&mutex);//锁定互斥锁 
+  pthread_mutex_lock(&mutex); //锁定互斥锁
   for (i = 0; i < 10; i++)
   {
     if (homeDev[i].enable == 1)
@@ -528,17 +532,17 @@ int GetHomeDevice(char *value)
         memset(tempstr, 0, 128);
         if (index++ == 0)
         {
-          sprintf(tempstr, "{\"id\":\"%s\",\"devtype\":\"%s\",\"statstr\":\"%s\"}", homeDev[i].mac,homeDev[i].devtype,homeDev[i].statstr);
+          sprintf(tempstr, "{\"id\":\"%s\",\"devtype\":\"%s\",\"ver\":\"%s\",\"statstr\":\"%s\"}", homeDev[i].mac, homeDev[i].devtype,homeDev[i].ver, homeDev[i].statstr);
         }
         else
         {
-          sprintf(tempstr, ",{\"id\":\"%s\",\"devtype\":\"%s\",\"statstr\":\"%s\"}", homeDev[i].mac,homeDev[i].devtype,homeDev[i].statstr);
+          sprintf(tempstr, ",{\"id\":\"%s\",\"devtype\":\"%s\",\"ver\":\"%s\",\"statstr\":\"%s\"}", homeDev[i].mac, homeDev[i].devtype, homeDev[i].ver,homeDev[i].statstr);
         }
         strcat(value, tempstr);
       }
     }
   }
-  pthread_mutex_unlock(&mutex);//打开互斥锁 
+  pthread_mutex_unlock(&mutex); //打开互斥锁
   return 0;
 }
 
@@ -563,6 +567,9 @@ int commandSendtoHomeDevice(int server_socket_fd, char *mac, char *sendData)
   int addr = FindHomeDevice(mac);
   struct sockaddr_in client_addr;
   socklen_t client_addr_length = sizeof(client_addr);
+
+  printf("send homesmart command 111 %0x\n", addr);
+
   if (addr == 0)
   {
     return 0;
@@ -571,19 +578,19 @@ int commandSendtoHomeDevice(int server_socket_fd, char *mac, char *sendData)
   {
     bzero(&client_addr, sizeof(client_addr));
     client_addr.sin_family = AF_INET;
-      client_addr.sin_port = htons(HOMEDEV_PORT);
+    client_addr.sin_port = htons(HOMEDEV_PORT);
     client_addr.sin_addr.s_addr = addr;
-    if(debug_mode>0)
-    printf("command send %0x\n",addr);
+    if (debug_mode > 0)
+      printf("command send %s\n", sendData);
     if (sendto(server_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&client_addr, client_addr_length) < 0)
     {
-      if(debug_mode>0)
-      printf("Send File Name Failed:");
+      if (debug_mode > 0)
+        printf("Send File Name Failed:");
     }
     else
     {
-      if(debug_mode>0)
-      printf("Send ok\n");
+      if (debug_mode > 0)
+        printf("Send ok\n");
     }
 
     return 1;
@@ -635,7 +642,6 @@ char *GetValByEtype(json_object *jobj, const char *sname)
     case json_type_int:
       return json_object_get_int(pval);
 
-
     default:
       return NULL;
     }
@@ -654,7 +660,7 @@ boolean GetBoolByEtype(json_object *jobj, const char *sname)
     switch (type)
     {
     case json_type_boolean:
-      return json_object_get_boolean(pval);      
+      return json_object_get_boolean(pval);
 
     default:
       return 0;
@@ -782,16 +788,16 @@ int jsonGetConfig(SOCKET s, json_object *config)
 
   if (config == NULL)
   {
-    if(debug_mode>0)
-    printf("jyb test error\n");
+    if (debug_mode > 0)
+      printf("jyb test error\n");
     return;
   }
 
   struct lh_entry *entry = json_object_get_object(obj)->head;
   for (; entry != NULL;)
   {
-    if(debug_mode>0)
-    printf("ri mabi\n");
+    if (debug_mode > 0)
+      printf("ri mabi\n");
     if (entry)
     {
       key = (char *)entry->k;
@@ -800,12 +806,12 @@ int jsonGetConfig(SOCKET s, json_object *config)
     }
     else
     {
-      if(debug_mode>0)
-      printf("mabi\n");
+      if (debug_mode > 0)
+        printf("mabi\n");
       break;
     }
-    if(debug_mode>0)
-    printf("tz sfdsfsa mabi\n");
+    if (debug_mode > 0)
+      printf("tz sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
     {
@@ -815,8 +821,8 @@ int jsonGetConfig(SOCKET s, json_object *config)
     default:
       break;
     }
-    if(debug_mode>0)
-    printf("jyb test %s %s\n", key, tempVal);
+    if (debug_mode > 0)
+      printf("jyb test %s %s\n", key, tempVal);
     memset(tempstr, 0, 1024);
     sprintf(tempstr, "%s", key);
     value = NULL;
@@ -826,24 +832,40 @@ int jsonGetConfig(SOCKET s, json_object *config)
       {
         if (value == NULL)
         {
-          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-              snprintf(kvbuf,1792, "\"%s\":[]", key);
+            snprintf(kvbuf, 1792, "\"%s\":[]", key);
           }
+          else  if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value") == 0)
+          {
+            snprintf(kvbuf, 1792, "\"%s\":\"\"", key);
+          }
+          else  if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value_5G") == 0)
+          {
+            snprintf(kvbuf, 1792, "\"%s\":\"\"", key);
+          }          
           else
           {
-             snprintf(kvbuf,1792, "\"%s\":\"\"", key);
+            snprintf(kvbuf, 1792, "\"%s\":\"\"", key);
           }
         }
         else
         {
-          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-              snprintf(kvbuf,1792, "\"%s\":%s", key, value);
+            snprintf(kvbuf, 1792, "\"%s\":%s", key, value);
           }
+          else   if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value") == 0)
+          {
+            snprintf(kvbuf, 1792, "\"%s\":%s", key, value);
+          }
+          else   if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value_5G") == 0)
+          {
+            snprintf(kvbuf, 1792, "\"%s\":%s", key, value);
+          }          
           else
           {
-          snprintf(kvbuf,1792, "\"%s\":\"%s\"", key, value);
+            snprintf(kvbuf, 1792, "\"%s\":\"%s\"", key, value);
           }
         }
       }
@@ -851,29 +873,45 @@ int jsonGetConfig(SOCKET s, json_object *config)
       {
         if (value == NULL)
         {
-          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-              snprintf(kvbuf,1792, "%s,%s:[]", kvbuf, key);
+            snprintf(kvbuf, 1792, "%s,%s:[]", kvbuf, key);
           }
+          else          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value") == 0)
+          {
+            snprintf(kvbuf, 1792, "%s,%s:\"\"", kvbuf, key);
+          }
+          else          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value_5G") == 0)
+          {
+            snprintf(kvbuf, 1792, "%s,%s:\"\"", kvbuf, key);
+          }          
           else
           {
-               snprintf(kvbuf,1792, "%s,\"%s\":\"\"", kvbuf, key);
+            snprintf(kvbuf, 1792, "%s,\"%s\":\"\"", kvbuf, key);
           }
         }
         else
         {
-          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-               snprintf(kvbuf,1792, "%s,\"%s\":%s", kvbuf, key, value);
+            snprintf(kvbuf, 1792, "%s,\"%s\":%s", kvbuf, key, value);
+          }
+          else           if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value") == 0)
+          {
+            snprintf(kvbuf, 1792, "%s,\"%s\":%s", kvbuf, key, value);
+          }
+          else           if (strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_value_5G") == 0)
+          {
+            snprintf(kvbuf, 1792, "%s,\"%s\":%s", kvbuf, key, value);
           }
           else
           {
-          snprintf(kvbuf,1792, "%s,\"%s\":\"%s\"", kvbuf, key, value);
+            snprintf(kvbuf, 1792, "%s,\"%s\":\"%s\"", kvbuf, key, value);
           }
         }
       }
-      if(debug_mode>0)
-      printf("jyb test  value %s \n", value);
+      if (debug_mode > 0)
+        printf("jyb test  value %s \n", value);
       free(value);
       value = NULL;
     }
@@ -883,24 +921,24 @@ int jsonGetConfig(SOCKET s, json_object *config)
       {
         if (index++ == 0)
         {
-          if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-              snprintf(kvbuf, 1792,"\"%s\":[]", key);
+            snprintf(kvbuf, 1792, "\"%s\":[]", key);
           }
           else
           {
-          snprintf(kvbuf, 1792,"\"%s\":\"\"", key);
+            snprintf(kvbuf, 1792, "\"%s\":\"\"", key);
           }
         }
         else
         {
-           if(strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")==0)
+          if (strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") == 0)
           {
-              snprintf(kvbuf,1792, "%s,\"%s\":[]", kvbuf, key);
+            snprintf(kvbuf, 1792, "%s,\"%s\":[]", kvbuf, key);
           }
           else
           {
-          snprintf(kvbuf,1792, "%s,\"%s\":\"\"", kvbuf, key);
+            snprintf(kvbuf, 1792, "%s,\"%s\":\"\"", kvbuf, key);
           }
         }
       }
@@ -912,14 +950,14 @@ int jsonGetConfig(SOCKET s, json_object *config)
     }
   }
   memset(sendbuf, 0, 2048);
-  snprintf(sendbuf,sizeof(sendbuf), GetResponse, deviceMac, kvbuf);
+  snprintf(sendbuf, sizeof(sendbuf), GetResponse, deviceMac, kvbuf);
 
-if(debug_mode>0)
-  printf("tz send mmmmmm %s\n", sendbuf);
+  if (debug_mode > 0)
+    printf("tz send mmmmmm %s\n", sendbuf);
 
   httppost(sendbuf, strlen(sendbuf));
-  if(debug_mode>0)
-  printf("tz send mmmmmm  333\n");
+  if (debug_mode > 0)
+    printf("tz send mmmmmm  333\n");
   // rc = send(s, sendbuf, strlen(sendbuf), 0);
 
   return rc;
@@ -938,8 +976,8 @@ int jsonSetConfig(SOCKET s, json_object *config)
 
   if (config == NULL)
   {
-    if(debug_mode>0)
-    printf("jyb test %s\n", config);
+    if (debug_mode > 0)
+      printf("jyb test %s\n", config);
     return 0;
   }
 
@@ -953,8 +991,8 @@ int jsonSetConfig(SOCKET s, json_object *config)
   for (; entry != NULL;)
   {
     pssid = NULL;
-    if(debug_mode>0)
-    printf("ri mabi\n");
+    if (debug_mode > 0)
+      printf("ri mabi\n");
     if (entry)
     {
       key = (char *)entry->k;
@@ -963,12 +1001,12 @@ int jsonSetConfig(SOCKET s, json_object *config)
     }
     else
     {
-      if(debug_mode>0)
-      printf("mabi\n");
+      if (debug_mode > 0)
+        printf("mabi\n");
       break;
     }
-    if(debug_mode>0)
-    printf("tz sfdsfsa mabi\n");
+    if (debug_mode > 0)
+      printf("tz sfdsfsa mabi\n");
     type = json_object_get_type(val);
     switch (type)
     {
@@ -978,19 +1016,21 @@ int jsonSetConfig(SOCKET s, json_object *config)
     default:
       break;
     }
-    if(debug_mode>0)
-    printf("jyb test 55555555 %s %s\n", key, tempVal);
-    if (key != NULL &&(!strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid")||!strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url")||!strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid2")))
+    if (debug_mode > 0)
+      printf("jyb test 55555555 %s %s\n", key, tempVal);
+    if (key != NULL && (!strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid") || !strcmp(key, "InternetGatewayDevice.DeviceInfo.black_url") || !strcmp(key, "InternetGatewayDevice.DeviceInfo.wireless_ssid2")))
     {
       strlenssid = strlen(tempVal);
       pssid = zstream_b64decode(tempVal, &strlenssid);
-      
-      if(strlen(pssid)>strlenssid)
+
+      if (strlen(pssid) > strlenssid)
       {
-        memset(urlComm,0,256);
-        memcpy(urlComm,pssid,strlenssid);
-        tempVal=urlComm;
-      }else {
+        memset(urlComm, 0, 256);
+        memcpy(urlComm, pssid, strlenssid);
+        tempVal = urlComm;
+      }
+      else
+      {
         tempVal = pssid;
       }
     }
@@ -1009,9 +1049,24 @@ int jsonSetConfig(SOCKET s, json_object *config)
     }
   }
   external_set_action_execute();
-  if(debug_mode>0)
-  printf("tz exec set ok\n");
+  if (debug_mode > 0)
+    printf("tz exec set ok\n");
   return rc;
+}
+
+int read_ver()
+{
+  FILE *fp = NULL;
+  fp=popen("SOFT_VERSION_SHELL","r"); 
+  if(fp== NULL) 
+  {
+    strcpy(deviceVer,SOFT_VERSION);
+    return 0;
+  }else{
+  fgets(deviceVer,32,fp);  
+  }
+  pclose(fp);
+  return 1;  
 }
 
 int read_mac()
@@ -1025,7 +1080,7 @@ int read_mac()
 
   if ((fp = fopen("/dev/mtdblock2", "r")) == NULL)
   {
-    
+
     printf("file cannot be opened/n");
   }
   fgets(buffstr, 32, fp);
@@ -1085,20 +1140,19 @@ char *exeShell(char *comm)
     sprintf(cliBuff, "execute command failed: %s", strerror(errno));
     return cliBuff;
   }
-      if(NULL!=fread(cliBuff,1, sizeof(cliBuff), fstream))    
-    {    
-       if(debug_mode>0)
-        printf("exeShell zhi\n");   
-        pclose(fstream);
-        return cliBuff;
-    }    
-    else   
-    {   
-        sprintf(cliBuff, "execute error");
-        pclose(fstream);   
-        return cliBuff;   
-    }   
-  
+  if (NULL != fread(cliBuff, 1, sizeof(cliBuff), fstream))
+  {
+    if (debug_mode > 0)
+      printf("exeShell zhi\n");
+    pclose(fstream);
+    return cliBuff;
+  }
+  else
+  {
+    sprintf(cliBuff, "execute error");
+    pclose(fstream);
+    return cliBuff;
+  }
 }
 
 int getCpuUsage()
@@ -1146,7 +1200,7 @@ struct mem_usage_t
   unsigned long cached;
 };
 
-int getMemUsage(int *memtotal,int *memfreeuse)
+int getMemUsage(int *memtotal, int *memfreeuse)
 {
   FILE *fp = NULL;
   struct mem_usage_t memge;
@@ -1384,7 +1438,7 @@ int get_ower()
   return 0;
 }
 
-void set_pifii_report(char *s1_addr,char *s1_port,char *s2_addr,char *s2_port,char *s2_path)
+void set_pifii_report(char *s1_addr, char *s1_port, char *s2_addr, char *s2_port, char *s2_path)
 {
   char option[16];
   struct uci_context *ctx = uci_alloc_context(); //申请上下文
@@ -1394,46 +1448,46 @@ void set_pifii_report(char *s1_addr,char *s1_port,char *s2_addr,char *s2_port,ch
       //.option = "value",
       //.value = "256",
   };
-  memset(reportServerIp,0,32);
-  strcpy(reportServerIp,s1_addr);
-  memset(reportServerPort,0,32);
-  strcpy(reportServerPort,s1_port);
-  memset(httpPostServerIp,0,32);
-  strcpy(httpPostServerIp,s2_addr);
-  memset(httpPostServerPort,0,32);
-  strcpy(httpPostServerPort,s2_port);
-  memset(httpPostServerPath,0,32);
-  strcpy(httpPostServerPath,s2_path);
+  memset(reportServerIp, 0, 32);
+  strcpy(reportServerIp, s1_addr);
+  memset(reportServerPort, 0, 32);
+  strcpy(reportServerPort, s1_port);
+  memset(httpPostServerIp, 0, 32);
+  strcpy(httpPostServerIp, s2_addr);
+  memset(httpPostServerPort, 0, 32);
+  strcpy(httpPostServerPort, s2_port);
+  memset(httpPostServerPath, 0, 32);
+  strcpy(httpPostServerPath, s2_path);
 
-  memset(option,0,16);
-  strcpy(option,"reportaddr");
+  memset(option, 0, 16);
+  strcpy(option, "reportaddr");
   ptr.option = option;
   ptr.value = s1_addr;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"reportport");
+  memset(option, 0, 16);
+  strcpy(option, "reportport");
   ptr.option = option;
   ptr.value = s1_port;
-  uci_set(ctx, &ptr);             //
+  uci_set(ctx, &ptr); //
 
-  memset(option,0,16);
-  strcpy(option,"postaddr");
+  memset(option, 0, 16);
+  strcpy(option, "postaddr");
   ptr.option = option;
   ptr.value = s2_addr;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"postport");
+  memset(option, 0, 16);
+  strcpy(option, "postport");
   ptr.option = option;
   ptr.value = s2_port;
-  uci_set(ctx, &ptr);             //写入配置  
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"postpath");
+  memset(option, 0, 16);
+  strcpy(option, "postpath");
   ptr.option = option;
   ptr.value = s2_path;
-  uci_set(ctx, &ptr);             //写入配置    
+  uci_set(ctx, &ptr); //写入配置
 
   uci_commit(ctx, &ptr.p, false); //提交保存更改
   uci_unload(ctx, ptr.p);         //卸载包
@@ -1441,25 +1495,24 @@ void set_pifii_report(char *s1_addr,char *s1_port,char *s2_addr,char *s2_port,ch
   uci_free_context(ctx); //释放上下文
 }
 
-int setblackmac(char *p,char *strblackmac)
+int setblackmac(char *p, char *strblackmac)
 {
-	char tmp[256];
-	char *sep=",";
-	char *token=NULL;
-	strcpy(tmp,p);
-	for(token=strtok(tmp,sep);token != NULL;token=strtok(NULL,sep))
-	{
-		printf("%s\n",token);
-	}
-	return 0;
+  char tmp[256];
+  char *sep = ",";
+  char *token = NULL;
+  strcpy(tmp, p);
+  for (token = strtok(tmp, sep); token != NULL; token = strtok(NULL, sep))
+  {
+    printf("%s\n", token);
+  }
+  return 0;
 }
 
-
-void set_pifii_uci(char *enable,char *weekdays,char *blacklist,char *timespan1,char *timespan2,char *timespan3)
+void set_pifii_uci(char *enable, char *weekdays, char *blacklist, char *timespan1, char *timespan2, char *timespan3)
 {
   char option[16];
   char tempValue[8];
-  int  rc;
+  int rc;
   struct uci_context *ctx = uci_alloc_context(); //申请上下文
   struct uci_ptr ptr = {
       .package = "pifii",
@@ -1474,89 +1527,82 @@ void set_pifii_uci(char *enable,char *weekdays,char *blacklist,char *timespan1,c
       //.option = "value",
       //.value = "256",
   };
-  memset(option,0,16);
-  strcpy(option,"enable");
+  memset(option, 0, 16);
+  strcpy(option, "enable");
   ptr.option = option;
   ptr.value = enable;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"weekdays");
+  memset(option, 0, 16);
+  strcpy(option, "weekdays");
   ptr.option = option;
   ptr.value = weekdays;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"blacklist");
+  memset(option, 0, 16);
+  strcpy(option, "blacklist");
   ptr.option = option;
   ptr.value = blacklist;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-  memset(option,0,16);
-  strcpy(option,"timespan1");
+  memset(option, 0, 16);
+  strcpy(option, "timespan1");
   ptr.option = option;
   ptr.value = timespan1;
-  uci_set(ctx, &ptr);             //写入配置
+  uci_set(ctx, &ptr); //写入配置
 
-
- 
-  memset(option,0,16);
-  strcpy(option,"timespan2");
+  memset(option, 0, 16);
+  strcpy(option, "timespan2");
   ptr.option = option;
   ptr.value = timespan2;
   uci_set(ctx, &ptr);             //写入配置
   uci_commit(ctx, &ptr.p, false); //提交保存更改
   uci_unload(ctx, ptr.p);         //卸载包
 
-
-  memset(option,0,16);
-  strcpy(option,"timespan3");
-  strcpy(tempValue,timespan3);
+  memset(option, 0, 16);
+  strcpy(option, "timespan3");
+  strcpy(tempValue, timespan3);
   ptrO.option = option;
   ptrO.value = tempValue;
-  rc= uci_set(ctx, &ptrO);    
-           //写入配置 
-if(debug_mode>0)           
- printf("tz timespan2 %s option=%s %d\n",timespan2,option,rc); 
+  rc = uci_set(ctx, &ptrO);
+  //写入配置
+  if (debug_mode > 0)
+    printf("tz timespan2 %s option=%s %d\n", timespan2, option, rc);
   uci_commit(ctx, &ptrO.p, false); //提交保存更改
   uci_unload(ctx, ptrO.p);         //卸载包
 
   uci_free_context(ctx); //释放上下文
 }
 
-
 struct msg_st
 {
-	long int msg_type;
-	char text[MAX_TEXT];
+  long int msg_type;
+  char text[MAX_TEXT];
 };
 
 int sendMsgQ()
 {
-	int running = 1;
-	struct msg_st data;
-	int msgid = -1;
+  int running = 1;
+  struct msg_st data;
+  int msgid = -1;
 
-	//建立消息队列
-	msgid = msgget((key_t)1234, 0666 | IPC_CREAT);
-	if(msgid == -1)
-	{
-		printf("msgget failed with error:\n");
-	}
+  //建立消息队列
+  msgid = msgget((key_t)1234, 0666 | IPC_CREAT);
+  if (msgid == -1)
+  {
+    printf("msgget failed with error:\n");
+  }
 
-	//向消息队列中写消息，直到写入end
+  //向消息队列中写消息，直到写入end
 
-
-		data.msg_type = 1;    //注意2
-		strcpy(data.text, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbo");
-		//向队列发送数据
-		if(msgsnd(msgid, (void*)&data, MAX_TEXT, 0) == -1)
-		{
-			printf("msgsnd failed\n");
-		}
-
+  data.msg_type = 1; //注意2
+  strcpy(data.text, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbo");
+  //向队列发送数据
+  if (msgsnd(msgid, (void *)&data, MAX_TEXT, 0) == -1)
+  {
+    printf("msgsnd failed\n");
+  }
 }
-
 
 float wirelessConfig(struct uci_context *c, WirelessDates *pWireless)
 {
@@ -1792,15 +1838,15 @@ float networkConfig(struct uci_context *c, NetworkDate *pNet)
 
 void returnReportInfo(char *reportMsg)
 {
-    sprintf(reportMsg,"\"reportaddr\":\"%s\",\"reportport\":\"%s\",\"postaddr\":\"%s\",\"postport\":\"%s\",\"postpath\":\"%s\"",\
-    reportServerIp,reportServerPort,httpPostServerIp,httpPostServerPort,httpPostServerPath);
+  sprintf(reportMsg, "\"reportaddr\":\"%s\",\"reportport\":\"%s\",\"postaddr\":\"%s\",\"postport\":\"%s\",\"postpath\":\"%s\"",
+          reportServerIp, reportServerPort, httpPostServerIp, httpPostServerPort, httpPostServerPath);
 }
 
-int getUciValue(struct uci_context *c,char *key,char *value)
+int getUciValue(struct uci_context *c, char *key, char *value)
 {
-   char  buf[64];
-   struct uci_ptr p;
-     sprintf(buf, "pifii.server.%s",key);
+  char buf[64];
+  struct uci_ptr p;
+  sprintf(buf, "pifii.server.%s", key);
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
     sprintf(value, "");
@@ -1817,8 +1863,7 @@ int getUciValue(struct uci_context *c,char *key,char *value)
     }
   }
 
-   return 1;
-
+  return 1;
 }
 
 void returnBlackMac(char *reportMsg)
@@ -1830,120 +1875,126 @@ void returnBlackMac(char *reportMsg)
   char timespan2[10];
   char timespan3[10];
 
-
-
   char buf[64];
-   struct uci_context *c = uci_alloc_context();
+  struct uci_context *c = uci_alloc_context();
 
-
-  getUciValue(c,  "enable", enable);
+  getUciValue(c, "enable", enable);
   getUciValue(c, "weekdays", weekdays);
   getUciValue(c, "blacklist", blacklist);
-  getUciValue(c,  "timespan1", timespan1);
-  getUciValue(c,  "timespan2", timespan2);
+  getUciValue(c, "timespan1", timespan1);
+  getUciValue(c, "timespan2", timespan2);
   getUciValue(c, "timespan3", timespan3);
 
   uci_free_context(c);
 
   sprintf(reportMsg, "\"enable\":\"%s\",\"weekdays\":\"%s\",\"blacklist\":\"%s\",\"timespan1\":\"%s\",\"timespan2\":\"%s\",\"timespan3\":\"%s\"",
-          enable,weekdays, blacklist, timespan1, timespan2, timespan3);
+          enable, weekdays, blacklist, timespan1, timespan2, timespan3);
 }
 
 void initReportConfig(struct uci_context *c)
 {
   char buf[64];
   struct uci_ptr p;
-  
+
   sprintf(buf, "pifii.server.devicetype");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(deviceType,DEVICE_TYPE_E);
+    sprintf(deviceType, DEVICE_TYPE_E);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(deviceType,p.o->v.string);
-    }else{
-      sprintf(deviceType,DEVICE_TYPE_E);
+      sprintf(deviceType, p.o->v.string);
+    }
+    else
+    {
+      sprintf(deviceType, DEVICE_TYPE_E);
     }
   }
-
 
   sprintf(buf, "pifii.server.reportaddr");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(reportServerIp,SERVER_IP);
+    sprintf(reportServerIp, SERVER_IP);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(reportServerIp,p.o->v.string);
-    }else{
-      sprintf(reportServerIp,SERVER_IP);
+      sprintf(reportServerIp, p.o->v.string);
+    }
+    else
+    {
+      sprintf(reportServerIp, SERVER_IP);
     }
   }
 
   sprintf(buf, "pifii.server.reportport");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(reportServerPort,SERVER_PORT);
+    sprintf(reportServerPort, SERVER_PORT);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(reportServerPort,p.o->v.string);
+      sprintf(reportServerPort, p.o->v.string);
     }
-    else {
-      sprintf(reportServerPort,SERVER_PORT);
+    else
+    {
+      sprintf(reportServerPort, SERVER_PORT);
     }
   }
   sprintf(buf, "pifii.server.postaddr");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(httpPostServerIp,HTTPPOST_IP);
+    sprintf(httpPostServerIp, HTTPPOST_IP);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(httpPostServerIp,p.o->v.string);
-    }else{
-     sprintf(httpPostServerIp,HTTPPOST_IP);
+      sprintf(httpPostServerIp, p.o->v.string);
+    }
+    else
+    {
+      sprintf(httpPostServerIp, HTTPPOST_IP);
     }
   }
 
-  sprintf(buf,"pifii.server.postport");
+  sprintf(buf, "pifii.server.postport");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(httpPostServerPort,HTTPPOST_PORT);
+    sprintf(httpPostServerPort, HTTPPOST_PORT);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(httpPostServerPort,p.o->v.string);
-    }else{
-      sprintf(httpPostServerPort,HTTPPOST_PORT);
+      sprintf(httpPostServerPort, p.o->v.string);
+    }
+    else
+    {
+      sprintf(httpPostServerPort, HTTPPOST_PORT);
     }
   }
-    sprintf(buf,"pifii.server.postpath");
+  sprintf(buf, "pifii.server.postpath");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-    sprintf(httpPostServerPath,HTTPPOST_PORT);
+    sprintf(httpPostServerPath, HTTPPOST_PORT);
   }
   else
   {
     if (p.o != NULL)
     {
-       sprintf(httpPostServerPath,p.o->v.string);
-    }else{
-      sprintf(httpPostServerPath,HTTPPOST_PATH);
+      sprintf(httpPostServerPath, p.o->v.string);
+    }
+    else
+    {
+      sprintf(httpPostServerPath, HTTPPOST_PATH);
     }
   }
-  
 }
 /*
 int threadHome()
@@ -2055,34 +2106,53 @@ int threadHome()
 */
 int check_image_name(char *name)
 {
-  int length =0;
+  int length = 0;
   char tempName[32];
-  
-  if(name==NULL)
-  {
-  return 0;
-  }else {
-    
-    if(!strcmp(deviceType,"IJLY_410"))
-    {
-        if(strstr(name,"D12_7628n_8m_IJLY410")!=NULL)
-        {
-            return 1;
-        }else{
-            return 0;
-        }
-    }else if(!strcmp(deviceType,"IJLY_420")){
-        if(strstr(name,"D11_7628n_16m_IJLY420")!=NULL)
-        {
-            return 1;
-        }else{
-            return 0;
-        }
 
-    }else{
+  if (name == NULL)
+  {
+    return 0;
+  }
+  else
+  {
+
+    if (!strcmp(deviceType, "IJLY_410"))
+    {
+      if (strstr(name, "D12_7628n_8m_IJLY410") != NULL)
+      {
+        return 1;
+      }
+      else
+      {
+        return 0;
+      }
+    }
+    else if (!strcmp(deviceType, "IJLY_420"))
+    {
+      if (strstr(name, "D11_7628n_16m_IJLY420") != NULL)
+      {
+        return 1;
+      }
+      else
+      {
+        return 0;
+      }
+    }
+    else if (!strcmp(deviceType, "ZLT P11(IDU)"))
+    {
+      if (strstr(name, "D12_7628n_8m_P11") != NULL)
+      {
+        return 1;
+      }
+      else
+      {
+        return 0;
+      }
+    }
+    else
+    {
       return 0;
     }
-
   }
   return 1;
 }
@@ -2093,15 +2163,16 @@ int threadUdp(int *socket_fd)
   char recvData[4096];
   char sendmsgData[1500];
   char tempstr[2048];
-  char *wificlient=NULL;
+  char *wificlient = NULL;
   int uptime;
 
   int id = 1;
   json_object *pobj, *p1_obj, *p2_obj, *p3_obj = NULL;
 
-  char *param_p1, *param_p2, *param_p3, *param_p4, *param_p5 = NULL,*param_p6;
+  char *param_p1, *param_p2, *param_p3, *param_p4, *param_p5 = NULL, *param_p6;
 
-  char *hsid, *hid, *hver, *hcmdtype,*hdevtype;
+  char *hsid, *hid, *hver, *hcmdtype, *hdevtype;
+  int dns_ok = 1;
 
   int hstatstr;
 
@@ -2134,37 +2205,37 @@ int threadUdp(int *socket_fd)
     memset(recvData, 0, 4096);
     if ((len = recvfrom(client_socket_fd, recvData, sizeof(recvData), 0, (struct sockaddr *)&server_addr, &server_addr_length)) > 0)
     {
-      if(debug_mode>0)
-      printf("tz recv%s\n", recvData);
+      if (debug_mode > 0)
+        printf("tz recv%s\n", recvData);
       //     new_obj = json_tokener_parse(TestJson);
       new_obj = json_tokener_parse(recvData);
-      if(debug_mode>0)
-      printf("tz recv 333%s\n", recvData);
-      if (new_obj==NULL||is_error(new_obj))
+      if (debug_mode > 0)
+        printf("tz recv 333%s\n", recvData);
+      if (new_obj == NULL || is_error(new_obj))
       {
-        if(debug_mode>0)
-        printf("tz error para%s\n");
+        if (debug_mode > 0)
+          printf("tz error para\n");
         // rc = send(s, ErrorJson, sizeof(ErrorJson), 0);
       }
       else
       {
         name = NULL;
-
+       printf("tz recv name smartdevice dsfdsa\n");
         name = GetValByEtype(new_obj, "name");
 
         //typeE = GetValByEtype(new_obj, "params");
-        if(debug_mode>0)
-        printf("tz recv name smartdevice\n");
+        if (debug_mode > 0)
+          printf("tz recv name smartdevice\n");
         if (name == NULL)
         {
           //rc = send(client_socket_fd, ErrorJson, sizeof(ErrorJson), 0);
           //发送  的json 错误
-           printf("tz recv name smartdevice 22\n");
+        //  printf("tz recv name smartdevice 22\n");
           hsid = GetValByEtype(new_obj, "sid");
           hid = GetValByEtype(new_obj, "id");
           hver = GetValByEtype(new_obj, "ver");
           hcmdtype = GetValByEtype(new_obj, "cmdtype");
-          printf("tz recv name smartdevice3 44 %d\n",hsid);
+
           if (hsid == NULL || hid == NULL || hver == NULL || hcmdtype == NULL)
           {
 
@@ -2173,34 +2244,60 @@ int threadUdp(int *socket_fd)
           else if (!strcmp(hcmdtype, "4097"))
           {
             //
-             printf("tz recv name smartdevice3333\n");
-   //         hdevtype = GetValByEtype(new_obj, "devtype");
-    //        hstatstr = GetBoolByEtype(new_obj, "devicestate");
+            hdevtype = GetValByEtype(new_obj, "devtype");
+            hver = GetValByEtype(new_obj, "ver");
+            hstatstr = GetBoolByEtype(new_obj, "devicestate");
             
-            
-       //     AddHomeDevice(hid, server_addr.sin_addr.s_addr,hdevtype,"1");
-            
+            if (hstatstr == 1)
+            {
+              AddHomeDevice(hid, server_addr.sin_addr.s_addr, hdevtype,hver ,"1");
+            }
+            else
+            {
+              AddHomeDevice(hid, server_addr.sin_addr.s_addr, hdevtype, hver,"0");
+            }
+
             memset(sendmsgData, 0, 1500);
-            sprintf(sendmsgData, HomeSwitchOn, hid, hver);
-          //  sprintf(sendmsgData, HomeResponse, "11", "22", "1");
-            printf("tz recv name ok %s\n",sendmsgData);
+            //  sprintf(sendmsgData, HomeSwitchOn, hid, hver);
+            sprintf(sendmsgData, HomeResponse, "1", hid, hver);
+            //           printf("tz recv name ok %s\n",sendmsgData);
             server_addr.sin_port = htons(HOMEDEV_PORT);
-          //  printf("tz recv name smartdevice3 44 %s %s %s\n",hsid,hid,hver);
-            if(debug_mode>0)
-             printf("tz homedevice %s\n",sendmsgData);
+            //  printf("tz recv name smartdevice3 44 %s %s %s\n",hsid,hid,hver);
+            if (debug_mode > 0)
+              printf("tz homedevice %s\n", sendmsgData);
             if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
             {
               printf("Send File Name Failed:");
             }
             else
             {
-              if(debug_mode>0)
-              printf("Send ok\n");
+              if (debug_mode > 0)
+                printf("Send ok\n");
             }
           }
-          else if (!strcmp(hcmdtype, "5001")||!strcmp(hcmdtype, "5002")||!strcmp(hcmdtype, "5003"))  //重启
-          { 
-            commandSendtoHomeDevice(client_socket_fd,hid,recvData);
+          else if (!strcmp(hcmdtype, "4"))
+          {
+            dns_ok = setnameserver(&(server_addr.sin_addr.s_addr), reportServerIp);
+            server_addr.sin_port = htons(HOMEDEV_PORT);
+            if (dns_ok == 1)
+            {
+              //  printf("tz recv name smartdevice3 44 %s %s %s\n",hsid,hid,hver);
+              if (debug_mode > 0)
+                printf("tz homedevice %s\n", sendmsgData);
+              if (sendto(client_socket_fd, recvData, strlen(recvData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+              {
+                printf("Send File Name Failed:");
+              }
+              else
+              {
+                if (debug_mode > 0)
+                  printf("Send ok\n");
+              }
+            }
+          }
+          else if (!strcmp(hcmdtype, "4099") || !strcmp(hcmdtype, "5001") || !strcmp(hcmdtype, "5002") || !strcmp(hcmdtype, "5003")) //重启
+          {
+            // commandSendtoHomeDevice(client_socket_fd, hid, recvData);
           }
           else
           {
@@ -2208,14 +2305,14 @@ int threadUdp(int *socket_fd)
         }
         else if (!strcmp(name, "informResponse"))
         {
-          if(debug_mode>0)
-          printf("jyb test 11 %d\n", commandId);
+          if (debug_mode > 0)
+            printf("jyb test 11 %d\n", commandId);
           commandId = GetIntByEtype(new_obj, "commandEvent");
-         if(debug_mode>0)
-          printf("jyb test 11 %d\n", commandId);
+          if (debug_mode > 0)
+            printf("jyb test 11 %d\n", commandId);
           if (commandId == 0)
           {
-            printf("jyb bbbbbb test 11\n");
+           // printf("jyb bbbbbb test 11\n");
             //   if (pReal->tr069state == 3)
             {
               //exeShell("/etc/init.d/freecwmpd stop&");
@@ -2274,46 +2371,49 @@ int threadUdp(int *socket_fd)
           }
           else if (strcmp(command, "inform") == 0)
           {
-            int indate=0,outdate=0;
-            int memtotal=0;
-            int memfreeuse=0;
-            int flashload =0;
-            int flashuse =0;
-            getDeviceSpeed(&indate,&outdate);
+            int indate = 0, outdate = 0;
+            int memtotal = 0;
+            int memfreeuse = 0;
+            int flashload = 0;
+            int flashuse = 0;
+            getDeviceSpeed(&indate, &outdate);
             memset(tempstr, 0, 2048);
             if (external_get_action("value", "InternetGatewayDevice.LANDevice.1.Wireless.WiFiClient", &wificlient) == 0)
             {
-              if(debug_mode>0)
-                printf("tz wificlient %s\n",wificlient);
-             
+              if (debug_mode > 0)
+                printf("tz wificlient %s\n", wificlient);
             }
             uptime = getRunTime();
-//            cpuload = getCpuUsage();
-            if(!strcmp(deviceType,"IJLY_410"))
+            //            cpuload = getCpuUsage();
+            if (!strcmp(deviceType, "IJLY_410"))
             {
-              flashload=8*1024;
-              flashuse =5123;
-            }else if(!strcmp(deviceType,"IJLY_410"))
-            {
-              flashload=16*1024;
-              flashuse =6123;
+              flashload = 8 * 1024;
+              flashuse = 5123;
             }
-            else {
-              flashload=8*1024;
-              flashuse =5123;
+            else if (!strcmp(deviceType, "IJLY_410"))
+            {
+              flashload = 16 * 1024;
+              flashuse = 6123;
+            }
+            else
+            {
+              flashload = 8 * 1024;
+              flashuse = 5123;
             }
 
-            getMemUsage(&memtotal,&memfreeuse);
-            if(wificlient==NULL)
+            getMemUsage(&memtotal, &memfreeuse);
+            if (wificlient == NULL)
             {
-              sprintf(tempstr, informRes, deviceMac,deviceMac,deviceType,HARD_VERSION,SOFT_VERSION,20,memfreeuse,memtotal,flashuse,flashload,uptime,indate,outdate,"[]");
+              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, "[]");
               free(wificlient);
-              wificlient=NULL;
+              wificlient = NULL;
               httppost(tempstr, strlen(tempstr));
-            }else {
-              sprintf(tempstr, informRes, deviceMac,deviceMac,deviceType,HARD_VERSION,SOFT_VERSION,20,memfreeuse,memtotal,flashuse,flashload,uptime,indate,outdate,wificlient);
+            }
+            else
+            {
+              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, wificlient);
               free(wificlient);
-              wificlient=NULL;
+              wificlient = NULL;
               httppost(tempstr, strlen(tempstr));
             }
           }
@@ -2329,7 +2429,7 @@ int threadUdp(int *socket_fd)
             memset(sendmsgData, 0, 1500);
             returnBlackMac(sendmsgData);
             sprintf(tempstr, GetBlackmac, deviceMac, sendmsgData);
-              server_addr.sin_port = htons(ROUTER_PORT);
+            server_addr.sin_port = htons(ROUTER_PORT);
             if (sendto(client_socket_fd, tempstr, strlen(tempstr), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
             {
               printf("Send File Name Failed:");
@@ -2341,7 +2441,7 @@ int threadUdp(int *socket_fd)
             returnReportInfo(sendmsgData);
             sprintf(tempstr, GetReport, deviceMac, sendmsgData);
             httppost(tempstr, strlen(tempstr));
-          }          
+          }
           else if (strcmp(command, "command") == 0)
           {
             memset(sendmsgData, 0, 1024);
@@ -2350,8 +2450,8 @@ int threadUdp(int *socket_fd)
             param_p2 = exeShell(param_p1);
             length = strlen(param_p2);
             param_p3 = zstream_b64encode(param_p2, &length);
-            if(debug_mode>0)
-            printf("tz %s\n", param_p3);
+            if (debug_mode > 0)
+              printf("tz %s\n", param_p3);
             sprintf(sendmsgData, CommandJson, deviceMac, param_p3);
             free(param_p3);
             rc = send(client_socket_fd, (char *)sendmsgData, sizeof(sendmsgData), 0);
@@ -2361,8 +2461,8 @@ int threadUdp(int *socket_fd)
             memset(sendmsgData, 0, 1500);
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "shellcmd");
-            if(debug_mode>0)
-            printf("jyb test %s\n", param_p1);
+            if (debug_mode > 0)
+              printf("jyb test %s\n", param_p1);
             if (param_p1 != NULL)
             {
               if (getConfigFile(tempstr, param_p1) != 0)
@@ -2393,14 +2493,14 @@ int threadUdp(int *socket_fd)
           char *c = NULL;
 
           command = GetValByEtype(new_obj, "keyname");
-          if(debug_mode>0)
-          printf("tz eeee 333 %s\n", command);
+          if (debug_mode > 0)
+            printf("tz eeee 333 %s\n", command);
           if (!strcmp(command, "config"))
           {
             p1_obj = json_object_object_get(new_obj, "packet");
             jsonSetConfig(client_socket_fd, p1_obj);
-            if(debug_mode>0)
-            printf("jyb test ok\n");
+            if (debug_mode > 0)
+              printf("jyb test ok\n");
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             httppost(tempstr, strlen(tempstr));
@@ -2419,16 +2519,17 @@ int threadUdp(int *socket_fd)
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "url");
             param_p2 = GetValByKey(p1_obj, "FileSize");
-            checkName=  check_image_name(param_p1);
-            if(param_p1!=NULL&&checkName==1)
+            checkName = check_image_name(param_p1);
+            if (param_p1 != NULL && checkName == 1)
             {
-                 sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "1");
-                 httppost(tempstr, strlen(tempstr));
-                 commandDownload(param_p1, param_p2);
+              sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "1");
+              httppost(tempstr, strlen(tempstr));
+              commandDownload(param_p1, param_p2);
             }
-            else{
-                 sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "2");
-                 httppost(tempstr, strlen(tempstr));
+            else
+            {
+              sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", deviceType, "CMTT", "2");
+              httppost(tempstr, strlen(tempstr));
             }
           }
           else if (!strcmp(command, "factory"))
@@ -2460,70 +2561,108 @@ int threadUdp(int *socket_fd)
             param_p1 = GetValByKey(p1_obj, "reportaddr");
             param_p2 = GetValByKey(p1_obj, "reportport");
             param_p3 = GetValByKey(p1_obj, "postaddr");
-            param_p4 = GetValByKey(p1_obj, "postport");       
-            param_p5 = GetValByKey(p1_obj, "postpath");                     
-            set_pifii_report(param_p1,param_p2,param_p3,param_p4,param_p5);
-          }          
+            param_p4 = GetValByKey(p1_obj, "postport");
+            param_p5 = GetValByKey(p1_obj, "postpath");
+            set_pifii_report(param_p1, param_p2, param_p3, param_p4, param_p5);
+          }
           else if (!strcmp(command, "homedevice"))
           {
             memset(tempstr, 0, 1024);
             sprintf(tempstr, DownloadResponse, deviceMac, command, "setok", "IJLY_410", "CMTT", "1");
             httppost(tempstr, strlen(tempstr));
-
           }
           else if (!strcmp(command, "blackmac"))
           {
-                        
+
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             httppost(tempstr, strlen(tempstr));
-            if(debug_mode>0)
-            printf("tz blackmac oooo\n");
+            if (debug_mode > 0)
+              printf("tz blackmac oooo\n");
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "enable");
-            param_p2 = GetValByKey(p1_obj, "weekdays");            
+            param_p2 = GetValByKey(p1_obj, "weekdays");
             param_p3 = GetValByKey(p1_obj, "blacklist");
             param_p4 = GetValByKey(p1_obj, "timespan1");
             param_p5 = GetValByKey(p1_obj, "timespan2");
-            param_p6 = GetValByKey(p1_obj, "timespan3");  
-            if(debug_mode>0) 
-            printf("tz blackmac oooo 222 \n");
-            set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
+            param_p6 = GetValByKey(p1_obj, "timespan3");
+            if (debug_mode > 0)
+              printf("tz blackmac oooo 222 \n");
+            set_pifii_uci(param_p1, param_p2, param_p3, param_p4, param_p5, param_p6);
             sendMsgQ();
-
           }
           else if (!strcmp(command, "appblackmac"))
           {
-                        
+
             memset(tempstr, 0, 1024);
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
-            if(debug_mode>0)
-            printf("tz appblackmac send %s\n",inet_ntoa(server_addr.sin_addr));
-           // server_addr.sin_addr.s_addr = inet_addr("192.168.3.68");
+            if (debug_mode > 0)
+              printf("tz appblackmac send %s\n", inet_ntoa(server_addr.sin_addr));
+            // server_addr.sin_addr.s_addr = inet_addr("192.168.3.68");
             server_addr.sin_port = htons(ROUTER_PORT);
             if (sendto(client_socket_fd, tempstr, strlen(tempstr), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
             {
               printf("Send File Name Failed:");
             }
-            if(debug_mode>0)
-            printf("tz blackmac oooo\n");
+            if (debug_mode > 0)
+              printf("tz blackmac oooo\n");
             p1_obj = GetValByEdata(new_obj, "packet");
             param_p1 = GetValByKey(p1_obj, "enable");
-            param_p2 = GetValByKey(p1_obj, "weekdays");            
+            param_p2 = GetValByKey(p1_obj, "weekdays");
             param_p3 = GetValByKey(p1_obj, "blacklist");
             param_p4 = GetValByKey(p1_obj, "timespan1");
             param_p5 = GetValByKey(p1_obj, "timespan2");
-            param_p6 = GetValByKey(p1_obj, "timespan3");  
-            if(debug_mode>0) 
-            printf("tz blackmac oooo 222 %s mmm %s jiang\n",param_p5,param_p6);
-            set_pifii_uci(param_p1,param_p2,param_p3,param_p4,param_p5,param_p6);
+            param_p6 = GetValByKey(p1_obj, "timespan3");
+            if (debug_mode > 0)
+              printf("tz blackmac oooo 222 %s mmm %s jiang\n", param_p5, param_p6);
+            set_pifii_uci(param_p1, param_p2, param_p3, param_p4, param_p5, param_p6);
             sendMsgQ();
-
           }
           else
           {
 
             //rc = send(client_socket_fd, ErrorJson, sizeof(ErrorJson), 0);
+          }
+        }
+        else if (!strcmp(name, "homesmart"))
+        {
+          char *c = NULL;
+
+          command = GetValByEtype(new_obj, "keyname");
+          if (debug_mode > 0)
+            printf("tz eeee 333 %s\n", command);
+          if (!strcmp(command, "set"))
+          {
+
+            hid = GetValByEtype(new_obj, "smartid");
+            p1_obj = GetValByEdata(new_obj, "packet");
+            if(p1_obj== NULL)
+            {
+               printf("send homesmart command %s\n", hid);
+            }
+            
+            if (hid != NULL)
+            {
+                  memset(sendmsgData, 0, 1500);
+                  sprintf(sendmsgData, HomeRespApp);
+                  server_addr.sin_port = htons(HOMEDEV_PORT);
+                  //  printf("tz recv name smartdevice3 44 %s %s %s\n",hsid,hid,hver);
+                  if (debug_mode > 0)
+                    printf("tz send xuewen %s\n", sendmsgData);
+                  if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+                  {
+                    printf("Send File Name Failed:");
+                  }
+                  else
+                  {
+                    if (debug_mode > 0)
+                      printf("Send app ok\n");
+                  }
+
+                printf("send homesmart command %s\n", command);
+                commandSendtoHomeDevice(client_socket_fd, hid, json_object_to_json_string(p1_obj));
+              //发送  的json 错误
+            }
           }
         }
         else
@@ -2534,8 +2673,6 @@ int threadUdp(int *socket_fd)
         }
         json_object_put(new_obj);
       }
-      
-      
     }
   }
 }
@@ -2558,7 +2695,7 @@ int get_gw_ip(char *eth, char *ipaddr)
 
   if (ioctl(sock_fd, SIOCGIFADDR, &ifr) < 0)
   {
-    
+
     return 0;
   }
 
@@ -2581,7 +2718,7 @@ int setnameserver(int *value, char *NET_IP)
     if ((host = gethostbyname(NET_IP)) == NULL) /*是主机名*/
     {
       printf("dns chucuo\n");
-      *value=inet_addr("113.98.195.201");
+      *value = inet_addr("113.98.195.201");
       return 0;
     }
     ipaddr = (struct in_addr *)host->h_addr;
@@ -2589,7 +2726,7 @@ int setnameserver(int *value, char *NET_IP)
   }
   else /*是ip地址*/
   {
-    
+
     *value = inaddr;
   }
   return 1;
@@ -2597,8 +2734,8 @@ int setnameserver(int *value, char *NET_IP)
 
 int getRegisterState()
 {
-    struct uci_context *c;
-      char buf[128];
+  struct uci_context *c;
+  char buf[128];
   struct uci_ptr p;
   int value = 0;
 
@@ -2606,7 +2743,7 @@ int getRegisterState()
   sprintf(buf, "pifii.register.device_id");
   if (UCI_OK != uci_lookup_ptr(c, &p, buf, true))
   {
-     value = 0;
+    value = 0;
   }
   else
   {
@@ -2616,9 +2753,8 @@ int getRegisterState()
     }
   }
 
-
-    uci_free_context(c);
-    return value;
+  uci_free_context(c);
+  return value;
 }
 
 int main(int argc, char *argv[])
@@ -2628,9 +2764,9 @@ int main(int argc, char *argv[])
   char sendData[1500];
   char strhomeState[1500];
   char wanIpaddr[32];
-      int uptime = 0;
-      int registState = 0;
-      int cpuload = 0;
+  int uptime = 0;
+  int registState = 0;
+  int cpuload = 0;
   int length;
   int rc;
   int commandId;
@@ -2638,23 +2774,23 @@ int main(int argc, char *argv[])
   int ret;
   pthread_t id1, id2;
 
-  if(argc >= 2)
+  if (argc >= 2)
   {
-    debug_mode=1;
+    debug_mode = 1;
   }
 
- // sigInit();
+  // sigInit();
   read_mac();
   initHomeDevice();
-  pthread_mutex_init(&mutex,NULL); 
+  pthread_mutex_init(&mutex, NULL);
 
   memset(informRes, 0, 1500);
   memset(infomsg, 0, 1500);
   getFileData(infomsg, "inform.json");
   getFileData(informRes, "informResponse.json");
 
-  if(debug_mode>0)
-  printf("send ok tit\n");
+  if (debug_mode > 0)
+    printf("send ok tit\n");
 
   int id = 0;
 
@@ -2690,7 +2826,6 @@ int main(int argc, char *argv[])
   bzero(&server_addr, sizeof(server_addr));
   bzero(&client_addr, sizeof(client_addr));
   server_addr.sin_family = AF_INET;
-
 
   socklen_t server_addr_length = sizeof(server_addr);
 
@@ -2732,20 +2867,18 @@ int main(int argc, char *argv[])
   int inSpeed = 0, outSpeed = 0;
   int looptimes = 10;
   int homeOrRoute = 0;
-  char *wificlient=NULL;
+  char *wificlient = NULL;
   int dns_ok = 1;
 
-    c = uci_alloc_context();
-    //   printf("tz wireless 22\n");
-    wirelessConfig(c, pWireless);
-    //   printf("tz wireless\n");
-    networkConfig(c, pNet);
-    //   printf("tz net\n");
-    initReportConfig(c);
+  c = uci_alloc_context();
+  //   printf("tz wireless 22\n");
+  wirelessConfig(c, pWireless);
+  //   printf("tz wireless\n");
+  networkConfig(c, pNet);
+  //   printf("tz net\n");
+  initReportConfig(c);
 
-    uci_free_context(c);
-
-
+  uci_free_context(c);
 
   while (1)
   {
@@ -2765,27 +2898,24 @@ int main(int argc, char *argv[])
       getConnectNum(&pReal->connectnum);
     }
 
-
-
     memset(sendData, 0, 1500);
 
-
-    dns_ok=  setnameserver(&(server_addr.sin_addr.s_addr),reportServerIp);
-  //  server_addr.sin_addr.s_addr= inet_addr(reportServerIp);
+    dns_ok = setnameserver(&(server_addr.sin_addr.s_addr), reportServerIp);
+    //  server_addr.sin_addr.s_addr= inet_addr(reportServerIp);
     server_addr.sin_port = htons(atoi(reportServerPort));
-    if(debug_mode>0)
-    printf("tz report port %s %s\n",reportServerIp,reportServerPort);
+    if (debug_mode > 0)
+      printf("tz report port %s %s\n", reportServerIp, reportServerPort);
 
     if (dns_ok == 1)
     {
       if (homeOrRoute % 2 == 0)
       {
         get_gw_ip("eth0.2", wanIpaddr);
-        if(registState==0)
+        if (registState == 0)
         {
           registState = getRegisterState();
         }
-        sprintf(sendData, infomsg,  deviceMac, commandkey, deviceMac,deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr,registState);
+        sprintf(sendData, infomsg, deviceMac, commandkey, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr, registState);
         if (debug_mode > 0)
           printf("send ok\n%s\n", sendData);
         if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
@@ -2798,7 +2928,7 @@ int main(int argc, char *argv[])
       {
         memset(strhomeState, 0, 1500);
         GetHomeDevice(strhomeState);
-        sprintf(sendData, HomeDeviceState, deviceMacFu, strhomeState);
+        sprintf(sendData, HomeDeviceState,deviceType, deviceMacFu, strhomeState);
         if (debug_mode > 0)
           printf("send ok\n%s\n", sendData);
         if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
