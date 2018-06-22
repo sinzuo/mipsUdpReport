@@ -87,7 +87,12 @@ static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
 #define HomeSwitchOff "{\"sid\": \"1\",\"id\": \"%s\",\"ver\": \"%s\",\
 				\"cmdtype\": \"4099\",\"subcmd\": 1,\"value\": 1}"
 #define HomeDeviceState "{\"name\": \"update_smartdevs\", \"ProductClass\": \"%s\",\"serialnumber\": \"%s\", \"devs\":[%s]}"
+#define HomeDeviceInit "{\"name\": \"msg\",\"version\": \"1.0.0\",\"packet\": [{\"mainid\": \"%s\",\"list\":[%s]}],\"serialnumber\": \"%s\",\"keyname\": \"newSecurity\"}"
+#define SafeDevTrap "{\"keyname\": \"smartSecurityMsg\",	\"name\": \"msg\",\"packet\": [{\"sid\": \"1\",	\"mainid\": \"%02X%02X\",\"ver\": \"16\",\
+		\"devtype\": \"%c\",\"devid\": \"%02X%02X\",\"state\": \"%02X\"}],\"serialnumber\": \"%s\",\"version\": \"1.0.0\"}"
+#define SDevReport "{\"id\": \"%s\",\"devtype\": \"3\",\"cmdtype\": \"5004\",\"list\": [%s]}"
 
+       
 char informRes[1500];
 pthread_mutex_t mutex;
 char reportServerIp[32];
@@ -180,6 +185,557 @@ typedef struct
 
 char deviceMac[13];
 char deviceMacFu[18];
+
+typedef struct dataType{
+    int  enable;
+    char id[8];
+    char cmd[8];
+    char type;
+}DataType;
+
+
+
+typedef struct Node  
+{//结构实现  
+    DataType data;  
+    struct Node* next;     
+}Node, *PNode; 
+
+typedef struct smartDev{
+    char name[10];
+    char state;
+    Node *dev;
+}SmartDev;
+
+
+char *GetArrayByKeyString(json_object *jobj,int index, const char *sname)
+{
+  json_object *pval = NULL;
+  json_object *tpval = NULL;
+  enum json_type type;
+  tpval = json_object_array_get_idx(jobj,index);
+  if(tpval == NULL)
+  {
+    return  NULL;
+  }
+  pval = json_object_object_get(tpval, sname);
+  if (NULL != pval)
+  {
+    type = json_object_get_type(pval);
+    switch (type)
+    {
+    case json_type_string:
+      return json_object_get_string(pval);
+
+    case json_type_object:
+      return json_object_to_json_string(pval);
+
+    default:
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+json_object *GetArrayByKeyObject(json_object *jobj,int index, const char *sname)
+{
+  json_object *pval = NULL;
+  json_object *tpval = NULL;
+  enum json_type type;
+  tpval = json_object_array_get_idx(jobj,index);
+  if(tpval == NULL)
+  {
+    return  NULL;
+  }
+  pval = json_object_object_get(tpval, sname);
+  if (NULL != pval)
+  {
+    type = json_object_get_type(pval);
+    switch (type)
+    {
+     case json_type_array:
+      return pval;
+
+    default:
+      return NULL;
+    }
+  }
+  return NULL;
+} 
+
+void InitList(PNode* PHead)//初始化  
+{  
+
+    *PHead = NULL;  
+}  
+  
+PNode ByeNode(DataType data)//申请一个结点  
+{  
+    PNode newNode = NULL;  
+    newNode = (PNode)malloc(sizeof(Node));  
+    if (NULL == newNode)  
+    {  
+        printf("out of memory.\n");  
+        exit(1);  
+    }  
+    else  
+    {  
+        newNode->data = data;  
+        newNode->next = NULL;  
+    }  
+    return newNode;  
+}  
+void PopBack(PNode* PHead)//尾删  
+{  
+
+    if (NULL == *PHead)  
+    {  
+        return;  
+    }  
+    else if(NULL == (*PHead)->next)  
+    {  
+        PNode TempNode = *PHead;  
+        free(TempNode);  
+        TempNode = NULL;  
+        *PHead = NULL;  
+    }  
+    else  
+    {  
+        PNode PCur = *PHead;  
+        while (PCur->next->next)  
+        {  
+            PCur = PCur->next;  
+        }  
+        PCur->next = NULL;  
+    }  
+}  
+  
+void PushBack(PNode* PHead, DataType data)//尾插  
+{  
+
+    if (NULL == *PHead)  
+    {  
+        *PHead = ByeNode(data);  
+    }  
+    else  
+    {  
+        PNode PCur = NULL;  
+        PCur = *PHead;  
+        while (PCur->next)  
+        {  
+            PCur = PCur->next;  
+        }  
+        PCur->next = ByeNode(data);  
+    }  
+}  
+ 
+void Destroy(PNode* PHead)//销毁  
+{  
+
+    PNode PCur = *PHead;  
+    while (PCur->next)  
+    {  
+        PNode Dnode = PCur;  
+        PCur = PCur->next;  
+        free(Dnode);  
+        Dnode = NULL;  
+    }  
+}  
+  
+int Empty(PNode PHead)//判空  
+{  
+    if (NULL == PHead)  
+        return 0;  
+    else  
+        return 1;  
+}  
+  
+int Size(PNode PHead)//求链表中结点的个数  
+{   
+    PNode Node = PHead;  
+    int num = 0;  
+    while (Node)  
+    {  
+        num++;  
+        Node = Node->next;  
+    }  
+    return num;  
+}  
+  
+void PrintList(PNode* PHead)//打印单链表  
+{  
+    PNode PCur = *PHead;  
+    while (PCur)  
+    {  
+        printf("%d->",PCur->data);  
+        PCur = PCur->next;  
+    }  
+    printf("NULL\n");  
+}  
+  
+void Insert(PNode pos, DataType data)//在data后插入结点  
+{  
+    PNode newNode = ByeNode(data);  
+    PNode PreNode = pos;  
+    newNode->next = PreNode->next;  
+    PreNode->next = newNode;  
+}  
+
+SmartDev *startDev;
+
+int initSmartDevArray()
+{
+  startDev= NULL;
+}
+
+int procSmartDevArray(json_object *jobj)
+{
+  
+    Node *start;
+    
+    json_object *pval = NULL;
+    json_object *tpval = NULL;
+    DataType data;
+    int length ;
+    int tlength ;
+    int index;
+    char *mainid,*id,*type;
+    memset(&data,0,sizeof(DataType));
+    if(jobj == NULL)
+    {
+      return 0;
+    }    
+    if(startDev == NULL)
+    {
+      startDev = (SmartDev *)malloc(sizeof(SmartDev));
+      startDev->dev = NULL;
+    }
+
+    start = startDev->dev;
+    if(start != NULL)
+    {
+        Destroy(&start);
+        InitList(&start);
+    }
+    length =  json_object_array_length(jobj);
+    if(length>0)
+    {
+        mainid =  GetArrayByKeyString(jobj,0,"mainid");
+        printf("jiangyibo mainid = %s\n",mainid);
+        strcpy(startDev->name,mainid);
+        pval = GetArrayByKeyObject(jobj,0,"list");
+        if(pval!=NULL)
+        {
+             
+            tlength =  json_object_array_length(pval);
+            printf("jiangyibo tlength = %d\n",tlength);
+            for(index = 0;index <tlength ;index ++)
+            {
+                id   =  GetArrayByKeyString(pval,index,"id");
+                type =  GetArrayByKeyString(pval,index,"type");
+                printf("jiangyibo mainid2 = %s\n",id);
+                strcpy(data.id,id);
+                strcpy(data.cmd,"00");
+                data.type = *type;
+                if(start== NULL)
+                {
+                   
+                   startDev->dev = ByeNode(data);
+                   start = startDev->dev;
+                   printf("jiangyibo type = %s\n",type);
+                }else {
+                  printf("jiangyibo type2 = %s\n",type);
+                   PushBack(&start,data);
+                }
+            }
+        }
+    }
+    return 1;
+    
+}
+
+int sendCheckSmartDev(char *anfangid,char *sendmsgData)
+{
+    char buf[128];
+    char mainid[10];
+    DataType data;
+     int index = 0;
+
+    int rsize = 0;
+    Node *PCur=NULL;
+
+    memset(buf,0,128);
+    
+    sprintf(sendmsgData, HomeDeviceInit, anfangid ,"",deviceMac);
+    if(startDev == NULL)
+    {
+      
+      return 1;
+    }
+    if(startDev->dev == NULL )
+    {
+        
+        return 0;
+    }else{
+        PCur = startDev->dev;
+        while(PCur)
+        {
+          if(PCur->data.enable == 1)
+          {
+            sprintf(buf,"{\"id\":\"%s\",\"type\":\"%c\",\"new\":\"1\"}",PCur->data.id,PCur->data.type);
+            sprintf(sendmsgData, HomeDeviceInit, anfangid ,buf,deviceMac);
+            PCur->data.enable = 0;
+            return 1;
+          }
+          PCur=PCur->next;
+        }
+    }
+    return 0;
+}
+
+char smartDevType(char *type)
+{
+    unsigned char value = (0xff&type[0]);
+     printf("jiangyibo ooooo %02x\n",value);
+     if(value == 0xC0||value == 0x0c||value == 0x03||value == 0x30)
+     {
+       return '1';
+     }
+     else if(value == 0x50)
+     {
+       return '2';
+     }
+     else if(value == 0x5C)
+     {
+       return '3';
+     }
+     else if(value == 0x34)
+     {
+       return '4';
+     }
+     else if(value == 0xFC)
+     {
+       return '5';
+     }     
+     else if(value == 0x74)
+     {
+       return '6';
+     }  
+     else 
+     {
+        value = value&0x0f;
+        if(value == 0x0D||value == 0x0E||value == 0x0F)
+        {
+          return '7';
+        } else{
+            return '8';
+        }
+     }
+}
+
+int findSmartDevArray(char *mid,char *id,char *type)
+{
+    char buf[256];
+    char mainid[10];
+    DataType data;
+    memset(buf,0,256);
+    int index = 0;
+    int state = 0;
+
+    int rsize = 0;
+    Node *PCur=NULL;
+    sprintf(mainid,"%02X%02X",0xff&mid[0],0xff&mid[1]);
+    sprintf(data.id,"%02X%02X",0xff&id[0],0xff&id[1]);
+    sprintf(data.cmd,"%02X",0xff&type[0]);
+    data.type = smartDevType(type);
+    if(startDev == NULL)
+    {
+      return 0;
+    }
+    if(strcmp(startDev->name,mainid))
+    {
+       return 0;
+    }
+    printf("jiangyibo cefang %02x\n",startDev->state&0xff);
+
+    if((0xff&type[0])== 0x0C)
+    {
+       startDev->state = 0x0C;
+       state = 1;
+    }else if((0xff&type[0])== 0xC0){
+       startDev->state = 0xC0;
+       state = 1;
+    }
+
+    if((startDev->state&0xff) == 0x0C&&state == 0)
+    {
+      printf("jiangyibo cefang %02x\n",startDev->state&0xff);
+          if(startDev->dev == NULL )
+          {
+              return 0;
+          }else{
+              PCur = startDev->dev;
+              while(PCur)
+              {
+                if(!strcmp(PCur->data.id,data.id))
+                {
+                  strcpy(PCur->data.cmd,data.cmd);
+                  PCur->data.type = data.type;
+                  return 0;
+                }
+                PCur=PCur->next;
+              }
+              return 0;
+          }
+    }else {
+         if(startDev->dev == NULL )
+          {
+             return 0;
+
+          }else{
+              PCur = startDev->dev;
+              while(PCur)
+              {
+                if(!strcmp(PCur->data.id,data.id))
+                {
+                  strcpy(PCur->data.cmd,data.cmd);
+                  PCur->data.type = data.type;
+                  return 1;
+                }
+                PCur=PCur->next;
+              }
+              return 0;
+          }
+    }
+
+}
+
+int findSmartDevArrayAdd(char *mid,char *id,char *type)
+{
+    char buf[256];
+    char mainid[10];
+    DataType data;
+    memset(buf,0,256);
+    int index = 0;
+    int state = 0;
+
+    int rsize = 0;
+    Node *PCur=NULL;
+    sprintf(mainid,"%02X%02X",0xff&mid[0],0xff&mid[1]);
+    sprintf(data.id,"%02X%02X",0xff&id[0],0xff&id[1]);
+    sprintf(data.cmd,"%02X",0xff&type[0]);
+    data.type = smartDevType(type);
+    if(startDev == NULL)
+    {
+      return 0;
+    }
+    if(strcmp(startDev->name,mainid))
+    {
+       return 0;
+    }
+    printf("jiangyibo cefang %02x\n",startDev->state&0xff);
+
+    if((0xff&type[0])== 0x0C)
+    {
+       startDev->state = 0x0C;
+       state = 1;
+    }else if((0xff&type[0])== 0xC0){
+       startDev->state = 0xC0;
+       state = 1;
+    }
+
+    if((startDev->state&0xff) == 0x0C&&state == 0)
+    {
+      printf("jiangyibo cefang %02x\n",startDev->state&0xff);
+          if(startDev->dev == NULL )
+          {
+             
+              startDev->dev = ByeNode(data);
+              return 0;
+          }else{
+              PCur = startDev->dev;
+              while(PCur)
+              {
+                if(!strcmp(PCur->data.id,data.id))
+                {
+                  strcpy(PCur->data.cmd,data.cmd);
+                  PCur->data.type = data.type;
+                  return 0;
+                }
+                PCur=PCur->next;
+              }
+              data.enable = 1;
+              PCur = startDev->dev;
+              PushBack(&PCur,data);
+              return 0;
+          }
+    }else {
+         if(startDev->dev == NULL )
+          {
+              
+              startDev->dev = ByeNode(data);
+              return 1;
+
+          }else{
+              PCur = startDev->dev;
+              while(PCur)
+              {
+                if(!strcmp(PCur->data.id,data.id))
+                {
+                  strcpy(PCur->data.cmd,data.cmd);
+                  PCur->data.type = data.type;
+                  return 1;
+                }
+                PCur=PCur->next;
+              }
+              data.enable = 1;
+              PCur = startDev->dev;
+              PushBack(&PCur,data);
+              return 1;
+          }
+    }
+
+}
+
+int postSmartDevArray(char *postBuf)
+{
+    char buf[1400];
+    memset(buf,0,1400);
+    int index = 0;
+
+    int rsize = 0;
+    Node *PCur=NULL;
+
+    if(startDev == NULL)
+    {
+      return 0;
+    }
+    rsize = Size(startDev->dev);
+    if(startDev->dev != NULL )
+    {
+        if( rsize > 1 )
+        {
+            PCur = startDev->dev;  
+            snprintf(buf, 1400, "{\"id\":\"%s\",\"remark_id\":\"%c%s\",\"state\":\"%s\",\"new\":\"1\"}", PCur->data.id,PCur->data.type,PCur->data.id,PCur->data.cmd);
+            PCur = PCur->next;
+            while(PCur)
+            {  
+                snprintf(buf, 1400, "%s,{\"id\":\"%s\",\"remark_id\":\"%c%s\",\"state\":\"%s\",\"new\":\"1\"}", buf, PCur->data.id,PCur->data.type,PCur->data.id,PCur->data.cmd);
+                PCur = PCur->next;  
+            }  
+        }
+        else
+        {
+                PCur = startDev->dev;  
+                snprintf(buf, 1400, "{\"id\":\"%s\",\"remark_id\":\"%c%s\",\"state\":\"%s\",\"new\":\"1\"}",PCur->data.id,PCur->data.type,PCur->data.id,PCur->data.cmd);
+        }
+    }
+    snprintf(postBuf, 1400, SDevReport,startDev->name,buf );
+//    printf("jiangyibo dingshifa %s\n",postBuf);
+    return 1;
+}
+
+
 
 pid_t getPidByName(char *name)
 {
@@ -441,12 +997,74 @@ typedef struct homedevice
   char statstr[64];
 } HomeDevice;
 
-HomeDevice homeDev[10];
+HomeDevice homeDev[20];
 
 int initHomeDevice()
 {
-  memset(homeDev, 0, 10 * sizeof(HomeDevice));
+  memset(homeDev, 0, 20 * sizeof(HomeDevice));
   return 1;
+}
+
+int AddHomeDeviceShort(char *mac, unsigned int addr,int port, char *devtype,char *ver, char *statstr)
+{
+  int i = 0;
+  time_t uptime;
+  uptime = time(NULL);
+
+  pthread_mutex_lock(&mutex); //锁定互斥锁
+  for (i = 0; i < 20; i++)
+  {
+
+    if (homeDev[i].enable == 0)
+    {
+
+      strcpy(homeDev[i].mac, mac);
+      homeDev[i].addr = addr;
+      if (devtype != NULL)
+      {
+        strcpy(homeDev[i].devtype, devtype);
+      }
+      if (statstr != NULL)
+      {
+        strcpy(homeDev[i].statstr, statstr);
+      }
+      if (ver != NULL)
+      {
+        strcpy(homeDev[i].ver, ver);
+      }
+      homeDev[i].uptime = port;
+      homeDev[i].enable = 1;
+
+      pthread_mutex_unlock(&mutex); //打开互斥锁
+      return 1;
+    }
+    else if (!strcmp(mac, homeDev[i].mac))
+    {
+      if (homeDev[i].addr == addr)
+      {
+        homeDev[i].uptime = port;
+      }
+      else
+      {
+        homeDev[i].addr = addr;
+        homeDev[i].uptime = port;
+      }
+
+      if (devtype != NULL)
+      {
+        strcpy(homeDev[i].devtype, devtype);
+      }
+      if (statstr != NULL)
+      {
+        strcpy(homeDev[i].statstr, statstr);
+      }
+
+      pthread_mutex_unlock(&mutex); //打开互斥锁
+      return 1;
+    }
+  }
+  pthread_mutex_unlock(&mutex); //打开互斥锁
+  return 0;
 }
 
 int AddHomeDevice(char *mac, unsigned int addr, char *devtype,char *ver, char *statstr)
@@ -456,7 +1074,7 @@ int AddHomeDevice(char *mac, unsigned int addr, char *devtype,char *ver, char *s
   uptime = time(NULL);
 
   pthread_mutex_lock(&mutex); //锁定互斥锁
-  for (i = 0; i < 10; i++)
+  for (i = 0; i < 20; i++)
   {
 
     if (homeDev[i].enable == 0)
@@ -511,15 +1129,18 @@ int AddHomeDevice(char *mac, unsigned int addr, char *devtype,char *ver, char *s
   return 0;
 }
 
+
 int GetHomeDevice(char *value)
 {
   int i;
   int index = 0;
   time_t lt;
   lt = time(NULL);
-  char tempstr[128];
+  char tempstr[1400];
+  int rc;
+  
   pthread_mutex_lock(&mutex); //锁定互斥锁
-  for (i = 0; i < 10; i++)
+  for (i = 0; i < 20; i++)
   {
     if (homeDev[i].enable == 1)
     {
@@ -529,7 +1150,7 @@ int GetHomeDevice(char *value)
       }
       else
       {
-        memset(tempstr, 0, 128);
+        memset(tempstr, 0, 1400);
         if (index++ == 0)
         {
           sprintf(tempstr, "{\"id\":\"%s\",\"devtype\":\"%s\",\"ver\":\"%s\",\"statstr\":\"%s\"}", homeDev[i].mac, homeDev[i].devtype,homeDev[i].ver, homeDev[i].statstr);
@@ -542,6 +1163,20 @@ int GetHomeDevice(char *value)
       }
     }
   }
+  memset(tempstr, 0, 1400);
+  rc = postSmartDevArray(tempstr);
+  if(rc != 0)
+  {
+      if(index == 0)
+      {
+        
+      }
+      else
+      {
+        sprintf(tempstr, ",%s",tempstr);
+      }
+      strcat(value, tempstr);
+  }
   pthread_mutex_unlock(&mutex); //打开互斥锁
   return 0;
 }
@@ -549,7 +1184,7 @@ int GetHomeDevice(char *value)
 int FindHomeDevice(char *mac)
 {
   int i;
-  for (i = 0; i < 10; i++)
+  for (i = 0; i < 20; i++)
   {
     if (homeDev[i].enable == 1)
     {
@@ -560,6 +1195,59 @@ int FindHomeDevice(char *mac)
     }
   }
   return 0;
+}
+
+int FindHomeDevicePort(char *mac,int *port)
+{
+  int i;
+  for (i = 0; i < 20; i++)
+  {
+    if (homeDev[i].enable == 1)
+    {
+      if (!strcmp(mac, homeDev[i].mac))
+      {
+        *port = homeDev[i].uptime;
+        return homeDev[i].addr;
+      }
+    }
+  }
+  return 0;
+}
+
+int commandSendtoHomeDevicePort(int server_socket_fd, char *mac, char *sendData)
+{
+  int port;
+  int addr = FindHomeDevicePort(mac,&port);
+  struct sockaddr_in client_addr;
+  socklen_t client_addr_length = sizeof(client_addr);
+
+  printf("send homesmart command 111 %0x\n", addr);
+
+  if (addr == 0)
+  {
+    return 0;
+  }
+  else
+  {
+    bzero(&client_addr, sizeof(client_addr));
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_port = htons(0xffff&port);
+    client_addr.sin_addr.s_addr = addr;
+    if (debug_mode > 0)
+      printf("command send %s port = %d\n", sendData,0xffff&port);
+    if (sendto(server_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&client_addr, client_addr_length) < 0)
+    {
+      if (debug_mode > 0)
+        printf("Send File Name Failed:");
+    }
+    else
+    {
+      if (debug_mode > 0)
+        printf("Send ok\n");
+    }
+
+    return 1;
+  }
 }
 
 int commandSendtoHomeDevice(int server_socket_fd, char *mac, char *sendData)
@@ -1057,13 +1745,15 @@ int jsonSetConfig(SOCKET s, json_object *config)
 int read_ver()
 {
   FILE *fp = NULL;
-  fp=popen("SOFT_VERSION_SHELL","r"); 
+  fp=popen(SOFT_VERSION_SHELL,"r"); 
   if(fp== NULL) 
   {
+    memset(deviceVer,0,32);
     strcpy(deviceVer,SOFT_VERSION);
     return 0;
   }else{
-  fgets(deviceVer,32,fp);  
+    memset(deviceVer,0,32);
+    fgets(deviceVer,32,fp);  
   }
   pclose(fp);
   return 1;  
@@ -1112,6 +1802,7 @@ static void sigHandle(int sig, struct siginfo *siginfo, void *myact)
     sleep(1);
   }
 }
+
 
 static void sigInit()
 {
@@ -1836,6 +2527,25 @@ float networkConfig(struct uci_context *c, NetworkDate *pNet)
   }
 }
 
+
+int getWifinamePassword(char *namepass)
+{
+   struct uci_context *c;
+
+   WirelessDates pWireless;
+  
+  c = uci_alloc_context();
+  //   printf("tz wireless 22\n");
+  wirelessConfig(c, &pWireless);
+
+  uci_free_context(c);
+  
+  sprintf(namepass,"+OK=%s,%s\n",  pWireless.wifidata[0].ssid,pWireless.wifidata[0].password);
+  
+
+  return 1;
+}
+
 void returnReportInfo(char *reportMsg)
 {
   sprintf(reportMsg, "\"reportaddr\":\"%s\",\"reportport\":\"%s\",\"postaddr\":\"%s\",\"postport\":\"%s\",\"postpath\":\"%s\"",
@@ -2157,6 +2867,217 @@ int check_image_name(char *name)
   return 1;
 }
 
+
+time_t savetime;
+int   startStudy;
+int   sameIndex;
+char  studyData[5][16];
+
+int initStrudyDate()
+{
+    startStudy = 0;
+    sameIndex = 0;
+}
+
+int setStrudyDate(int enable)
+{
+    if(enable == 0)
+    {
+       savetime   = 0;
+       startStudy = 0;
+       sameIndex  = 0;
+    }
+    else 
+    {
+       savetime   = time(NULL);
+       sameIndex  = 0;
+       startStudy = 1;
+    }
+}
+
+int strudyDateMode(char *data)
+{
+     //30秒内收到相同报文
+     time_t intime;
+
+     if((0xff&data[5])== 0x03)
+     {
+       setStrudyDate(1);
+       return 0;
+     }
+
+     if(startStudy == 0)
+     {
+       sameIndex = 0;
+       return 0;
+     }
+     
+     intime = time(NULL);
+     printf("jiangyibo wwwwww111 11111\n");
+     if(intime - savetime > 30)
+     {
+          printf("jiangyibo wwwwww111 222\n");
+          savetime   = 0;
+          startStudy = 0;
+          return 0;
+     }else{
+         if(sameIndex ++ >= 3)
+         {
+           printf("jiangyibo wwwwww111  3333\n");
+           startStudy = 0;
+           return 1;
+         }else{
+           printf("jiangyibo wwwwww111  44444\n");
+           return 0;
+         }
+     }
+/*
+     if(startStudy== 1)
+     {
+         savetime = intime;
+         snprintf(studyData,16,data);
+     }else if(startStudy >= 4)
+     {
+          startStudy = 0;
+     }
+     else 
+     {
+          if(!strcmp(studyData,data))
+          {
+            return 1;
+          }
+     }
+     return 1;
+*/     
+}
+
+int safeGateDate(char *data,int length,int client_socket_fd, struct sockaddr_in server_addr)
+{
+  char sendmsgData[512];  
+  char anfangid[10];
+  int  i = 0;
+  int  index = 0;
+  int  rc;
+  int  ishave ;
+  char smarttype;
+
+  memset(sendmsgData,0,512);
+
+
+
+  socklen_t server_addr_length = sizeof(server_addr);
+  printf("Send to safeDev HB ID ok %02X%02X%02X\n",data[0],data[1],data[2]);
+  if(data[0]==11)
+  {
+     //recive request ssid, send ssid
+    if(length == 9)
+    {
+      getWifinamePassword(sendmsgData);
+      printf("jiangyibo ssid %s\n",sendmsgData);
+//      sprintf(sendmsgData,"+OK=%s,%s\n","ihome-fd0cdc","12345678");
+      if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+      {
+        printf("Send File Name Failed:");
+      }
+      else
+      {
+        if (debug_mode > 0)
+          printf("Send to safeDev ssid  ok\n");
+      }
+    }
+    return 1;
+  }
+  else if(data[0]==0xa||data[0]==0x9){
+      
+
+    // recive heartbear
+    return 1;
+  }
+  else if(data[0]==0xc){
+    // recive heartbear
+
+      memset(sendmsgData,0,512);
+      sprintf(sendmsgData,"%02X%02X",data[1],data[2]);
+      sprintf(anfangid,"%02X%02X",data[1],data[2]);
+      
+      AddHomeDeviceShort(sendmsgData, server_addr.sin_addr.s_addr,htons(server_addr.sin_port) ,"3","2","1");
+      sprintf(sendmsgData,"+OK\r\n");
+      if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+      {
+        printf("Send File Name Failed:");
+      }
+      else
+      {
+        if (debug_mode > 0)
+          printf("Send to safeDev HB ok port= %d\n",htons(server_addr.sin_port));
+      }
+      rc = sendCheckSmartDev(anfangid,sendmsgData);
+      if( rc == 1 && index==0)
+      {
+          httppost(sendmsgData, strlen(sendmsgData));
+          if(index++ > 30)
+          {
+            index = 0;
+          }
+      }
+
+      return 1;
+  }  
+  else if(data[0]==0x0d&&length==8){
+      // recive deve alarm
+      memset(sendmsgData,0,128);
+
+      sprintf(sendmsgData,"+OK\r\n");
+      if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+      {
+        printf("Send File Name Failed:");
+      }
+      else
+      {
+        if (debug_mode > 0)
+          printf("Send to safeDev alarm ok\n");
+      }
+
+      if (debug_mode > 0)
+        printf("tz send mmmmmm %s\n", sendmsgData);
+
+      ishave = strudyDateMode(data);
+
+      if( ishave == 1 )  // duima mode add device
+      {
+          printf("jiangyibo wwwwww111 11111 66666\n");
+          sprintf(anfangid,"%02X%02X",data[1],data[2]);
+          rc =  findSmartDevArrayAdd( &data[1],&data[3] ,&data[5] );
+          rc = sendCheckSmartDev(anfangid,sendmsgData);
+          httppost(sendmsgData, strlen(sendmsgData));
+        
+      }else if(startStudy == 0){
+        printf("jiangyibo wwwwww111 11111 77777\n");
+        rc =   findSmartDevArray( &data[1],&data[3] ,&data[5] );
+        if(rc > 0)
+        {
+            memset(sendmsgData,0,128);
+
+            smarttype =   smartDevType(&data[5]);
+
+            sprintf(sendmsgData, SafeDevTrap,0xff & data[1],0xff &data[2], smarttype ,0xff &data[3],0xff &data[4],0xff &data[5],deviceMac);
+
+            httppost(sendmsgData, strlen(sendmsgData));
+        }
+      }
+
+
+      if (debug_mode > 0)
+        printf("tz send mmmmmm  333\n");
+ 
+      return 2;
+  }  
+  else{
+    // recive other 
+    return 0;
+  }
+}
+
 int threadUdp(int *socket_fd)
 {
   int client_socket_fd = *socket_fd;
@@ -2207,6 +3128,13 @@ int threadUdp(int *socket_fd)
     {
       if (debug_mode > 0)
         printf("tz recv%s\n", recvData);
+
+      rc = safeGateDate(recvData,len,client_socket_fd,server_addr);
+
+      if(rc > 0)
+      {
+        continue ;
+      }
       //     new_obj = json_tokener_parse(TestJson);
       new_obj = json_tokener_parse(recvData);
       if (debug_mode > 0)
@@ -2404,14 +3332,14 @@ int threadUdp(int *socket_fd)
             getMemUsage(&memtotal, &memfreeuse);
             if (wificlient == NULL)
             {
-              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, "[]");
+              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, deviceVer, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, "[]");
               free(wificlient);
               wificlient = NULL;
               httppost(tempstr, strlen(tempstr));
             }
             else
             {
-              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, wificlient);
+              sprintf(tempstr, informRes, deviceMac, deviceMac, deviceType, HARD_VERSION, deviceVer, 20, memfreeuse, memtotal, flashuse, flashload, uptime, indate, outdate, wificlient);
               free(wificlient);
               wificlient = NULL;
               httppost(tempstr, strlen(tempstr));
@@ -2511,6 +3439,14 @@ int threadUdp(int *socket_fd)
             sprintf(tempstr, SetResponse, deviceMac, command, "setok");
             httppost(tempstr, strlen(tempstr));
             system("reboot");
+          }
+          else if (!strcmp(command, "homesecuritylist"))
+          {
+            p1_obj = json_object_object_get(new_obj, "packet");
+            memset(tempstr, 0, 1024);
+            sprintf(tempstr, SetResponse, deviceMac, command, "setok");
+            httppost(tempstr, strlen(tempstr));
+            procSmartDevArray(p1_obj);
           }
           else if (!strcmp(command, "download"))
           {
@@ -2643,6 +3579,9 @@ int threadUdp(int *socket_fd)
             
             if (hid != NULL)
             {
+                  param_p1 = GetValByKey(p1_obj, "cmdtype");
+                  param_p3 = GetValByKey(p1_obj, "devtype");
+
                   memset(sendmsgData, 0, 1500);
                   sprintf(sendmsgData, HomeRespApp);
                   server_addr.sin_port = htons(HOMEDEV_PORT);
@@ -2658,9 +3597,41 @@ int threadUdp(int *socket_fd)
                     if (debug_mode > 0)
                       printf("Send app ok\n");
                   }
-
                 printf("send homesmart command %s\n", command);
+                if(param_p3!=NULL&&!strcmp(param_p3,"3"))
+                {
+
+                      if(param_p1!=NULL&&!strcmp(param_p1,"5004"))
+                      {
+                          param_p2 = GetValByKey(p1_obj, "value");
+                          if(startDev!=NULL)
+                          {
+                            startDev->state = 0xC0;
+                          }
+                          memset(tempstr, 0, 1024);
+                          sprintf(tempstr,"%s\r\n",param_p2);
+                          commandSendtoHomeDevicePort(client_socket_fd, hid,tempstr );
+                      } 
+                      else if(param_p1!=NULL&&!strcmp(param_p1,"5005"))
+                      {
+                          param_p2 = GetValByKey(p1_obj, "value");
+                          if(startDev!=NULL)
+                          {
+                            startDev->state = 0x0C;
+                          }
+                          memset(tempstr, 0, 1024);
+                          sprintf(tempstr,"%s\r\n",param_p2);
+                          commandSendtoHomeDevicePort(client_socket_fd, hid,tempstr );
+                      }else{
+                          param_p2 = GetValByKey(p1_obj, "value");
+                          memset(tempstr, 0, 1024);
+                          sprintf(tempstr,"%s\r\n",param_p2);
+                          commandSendtoHomeDevicePort(client_socket_fd, hid,tempstr );
+                      }
+                }
+                else {
                 commandSendtoHomeDevice(client_socket_fd, hid, json_object_to_json_string(p1_obj));
+                }
               //发送  的json 错误
             }
           }
@@ -2780,8 +3751,11 @@ int main(int argc, char *argv[])
   }
 
   // sigInit();
+  initStrudyDate();
   read_mac();
+  read_ver();
   initHomeDevice();
+  initSmartDevArray();
   pthread_mutex_init(&mutex, NULL);
 
   memset(informRes, 0, 1500);
@@ -2915,7 +3889,7 @@ int main(int argc, char *argv[])
         {
           registState = getRegisterState();
         }
-        sprintf(sendData, infomsg, deviceMac, commandkey, deviceMac, deviceType, HARD_VERSION, SOFT_VERSION, cpuload, uptime, wanIpaddr, registState);
+        sprintf(sendData, infomsg, deviceMac, commandkey, deviceMac, deviceType, HARD_VERSION, deviceVer, cpuload, uptime, wanIpaddr, registState);
         if (debug_mode > 0)
           printf("send ok\n%s\n", sendData);
         if (sendto(client_socket_fd, sendData, strlen(sendData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
