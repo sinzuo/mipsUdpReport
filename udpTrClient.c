@@ -90,7 +90,7 @@ static char *fc_script_set_actions = "/tmp/freecwmp_set_action_values.sh";
 #define HomeDeviceInit "{\"name\": \"msg\",\"version\": \"1.0.0\",\"packet\": [{\"mainid\": \"%s\",\"list\":[%s]}],\"serialnumber\": \"%s\",\"keyname\": \"newSecurity\"}"
 #define SafeDevTrap "{\"keyname\": \"smartSecurityMsg\",	\"name\": \"msg\",\"packet\": [{\"sid\": \"1\",	\"mainid\": \"%02X%02X\",\"ver\": \"16\",\
 		\"devtype\": \"%c\",\"devid\": \"%02X%02X\",\"state\": \"%02X\"}],\"serialnumber\": \"%s\",\"version\": \"1.0.0\"}"
-#define SDevReport "{\"id\": \"%s\",\"devtype\": \"3\",\"cmdtype\": \"5004\",\"list\": [%s]}"
+#define SDevReport "{\"id\": \"%s\",\"devtype\": \"3\",\"cmdtype\": \"%s\",\"list\": [%s]}"
 
        
 char informRes[1500];
@@ -203,7 +203,7 @@ typedef struct Node
 
 typedef struct smartDev{
     char name[10];
-    char state;
+    unsigned  char state;
     Node *dev;
 }SmartDev;
 
@@ -493,6 +493,99 @@ int sendCheckSmartDev(char *anfangid,char *sendmsgData)
     return 0;
 }
 
+int setZeroSmartDev()
+{
+
+    char mainid[10];
+    DataType data;
+     int index = 0;
+
+    int rsize = 0;
+    Node *PCur=NULL;
+
+
+    if(startDev == NULL)
+    {
+      return 1;
+    }
+    if(startDev->dev == NULL )
+    {
+        return 0;
+    }else{
+        PCur = startDev->dev;
+        while(PCur)
+        {
+          strcpy(PCur->data.cmd,"00");
+          PCur=PCur->next;
+        }
+    }
+    return 0;
+}
+
+char smartDevToCenter(char *data,char *sdata)
+{
+
+     unsigned char value = (0xff&data[5]);
+     memcpy(sdata,data+1,4);
+     printf("jiangyibo return send %02x\n",value);
+     if(value == 0x03)
+     {
+       sprintf(sdata+4,"02X",value);
+       return '1';
+     }
+     else if(value == 0xC0)
+     {
+       strcpy(sdata,"+CMD=C0\r\n");
+       return '2';
+     }  
+     else if(value == 0x0C)
+     {
+       strcpy(sdata,"+CMD=0C\r\n");
+       return '2';
+     }            
+     else if(value == 0x30)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '2';
+     }     
+     else if(value == 0x50)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '2';
+     }
+     else if(value == 0x5C)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '3';
+     }
+     else if(value == 0x34)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '4';
+     }
+     else if(value == 0xFC)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '5';
+     }     
+     else if(value == 0x74)
+     {
+       strcpy(sdata,"+CMD=30\r\n");
+       return '6';
+     }  
+     else 
+     {
+        value = value&0x0f;
+        if(value == 0x0D||value == 0x0E||value == 0x0F)
+        {
+          strcpy(sdata,"+CMD=30\r\n");
+          return '7';
+        } else{
+            return '8';
+        }
+     }
+}
+
 char smartDevType(char *type)
 {
     unsigned char value = (0xff&type[0]);
@@ -521,6 +614,10 @@ char smartDevType(char *type)
      {
        return '6';
      }  
+     else if(value == 0x0)
+     {
+       return '9';
+     }       
      else 
      {
         value = value&0x0f;
@@ -548,6 +645,10 @@ int findSmartDevArray(char *mid,char *id,char *type)
     sprintf(data.id,"%02X%02X",0xff&id[0],0xff&id[1]);
     sprintf(data.cmd,"%02X",0xff&type[0]);
     data.type = smartDevType(type);
+    if(data.type == '9')
+    {
+      return 0;
+    }
     if(startDev == NULL)
     {
       return 0;
@@ -558,16 +659,9 @@ int findSmartDevArray(char *mid,char *id,char *type)
     }
     printf("jiangyibo cefang %02x\n",startDev->state&0xff);
 
-    if((0xff&type[0])== 0x0C)
-    {
-       startDev->state = 0x0C;
-       state = 1;
-    }else if((0xff&type[0])== 0xC0){
-       startDev->state = 0xC0;
-       state = 1;
-    }
 
-    if((startDev->state&0xff) == 0x0C&&state == 0)
+
+    if((startDev->state&0xff) != 0xC0)
     {
       printf("jiangyibo cefang %02x\n",startDev->state&0xff);
           if(startDev->dev == NULL )
@@ -581,7 +675,20 @@ int findSmartDevArray(char *mid,char *id,char *type)
                 {
                   strcpy(PCur->data.cmd,data.cmd);
                   PCur->data.type = data.type;
-                  return 0;
+                  // in device list change state
+                  if((0xff&type[0])== 0x0C)
+                  {
+                    startDev->state = 0x0C;
+                    setZeroSmartDev();
+                    state = 0;
+                    return 1;
+                  }else if((0xff&type[0])== 0xC0){
+                    startDev->state = 0xC0;
+                    state = 1;
+                    return 1;
+                  }else{
+                    return 0;
+                  }
                 }
                 PCur=PCur->next;
               }
@@ -600,7 +707,19 @@ int findSmartDevArray(char *mid,char *id,char *type)
                 {
                   strcpy(PCur->data.cmd,data.cmd);
                   PCur->data.type = data.type;
-                  return 1;
+                  if((0xff&type[0])== 0x0C)
+                  {
+                    startDev->state = 0x0C;
+                    setZeroSmartDev();
+                    state = 0;
+                    return 1;
+                  }else if((0xff&type[0])== 0xC0){
+                    startDev->state = 0xC0;
+                    state = 1;
+                    return 1;
+                  }else{
+                    return 1;
+                  }                  
                 }
                 PCur=PCur->next;
               }
@@ -730,7 +849,13 @@ int postSmartDevArray(char *postBuf)
                 snprintf(buf, 1400, "{\"id\":\"%s\",\"remark_id\":\"%c%s\",\"state\":\"%s\",\"new\":\"1\"}",PCur->data.id,PCur->data.type,PCur->data.id,PCur->data.cmd);
         }
     }
-    snprintf(postBuf, 1400, SDevReport,startDev->name,buf );
+
+    if(0xff&startDev->state == 0xC0)
+    {
+      snprintf(postBuf, 1400, SDevReport,startDev->name,"5004",buf );
+    }else {
+      snprintf(postBuf, 1400, SDevReport,startDev->name,"5005",buf );
+    }
 //    printf("jiangyibo dingshifa %s\n",postBuf);
     return 1;
 }
@@ -2873,6 +2998,26 @@ int   startStudy;
 int   sameIndex;
 char  studyData[5][16];
 
+int setStrudyLed(int enable)
+{
+  FILE *fp = NULL;
+  char buf[64];
+  if(enable == 1)
+  {
+      sprintf(buf,"echo \"%d\" >/sys/class/leds/wifi/brightness",0);
+  }else{
+      sprintf(buf,"echo \"%d\" >/sys/class/leds/wifi/brightness",1);
+  }
+  fp=popen(buf,"r"); 
+  if(fp== NULL) 
+  {
+     return 1;
+  }
+  else{
+    return 0;
+  }
+}
+
 int initStrudyDate()
 {
     startStudy = 0;
@@ -2881,6 +3026,7 @@ int initStrudyDate()
 
 int setStrudyDate(int enable)
 {
+    setStrudyLed(enable);
     if(enable == 0)
     {
        savetime   = 0;
@@ -2917,14 +3063,13 @@ int strudyDateMode(char *data)
      if(intime - savetime > 30)
      {
           printf("jiangyibo wwwwww111 222\n");
-          savetime   = 0;
-          startStudy = 0;
+          setStrudyDate(0);
           return 0;
      }else{
          if(sameIndex ++ >= 3)
          {
            printf("jiangyibo wwwwww111  3333\n");
-           startStudy = 0;
+           setStrudyDate(0);
            return 1;
          }else{
            printf("jiangyibo wwwwww111  44444\n");
@@ -3041,6 +3186,12 @@ int safeGateDate(char *data,int length,int client_socket_fd, struct sockaddr_in 
       if (debug_mode > 0)
         printf("tz send mmmmmm %s\n", sendmsgData);
 
+      rc =   findSmartDevArray( &data[1],&data[3] ,&data[5] );
+      if(rc == 0)
+      {
+            return 2;
+      }
+
       ishave = strudyDateMode(data);
 
       if( ishave == 1 )  // duima mode add device
@@ -3053,17 +3204,30 @@ int safeGateDate(char *data,int length,int client_socket_fd, struct sockaddr_in 
         
       }else if(startStudy == 0){
         printf("jiangyibo wwwwww111 11111 77777\n");
-        rc =   findSmartDevArray( &data[1],&data[3] ,&data[5] );
-        if(rc > 0)
-        {
+
+
+            //send to smart center
             memset(sendmsgData,0,128);
-
+            smartDevToCenter(data,sendmsgData);
+            sleep(1);
+           
+            
+            if (sendto(client_socket_fd, sendmsgData, strlen(sendmsgData), 0, (struct sockaddr *)&server_addr, server_addr_length) < 0)
+            {
+              printf("Send Command Failed:");
+            }
+            else
+            {
+              if (debug_mode > 0)
+                printf("Send Command safeDev alarm ok %s\n",sendmsgData);
+            }
+            
+            //post to smart center
+            memset(sendmsgData,0,128);
             smarttype =   smartDevType(&data[5]);
-
             sprintf(sendmsgData, SafeDevTrap,0xff & data[1],0xff &data[2], smarttype ,0xff &data[3],0xff &data[4],0xff &data[5],deviceMac);
-
             httppost(sendmsgData, strlen(sendmsgData));
-        }
+        
       }
 
 
@@ -3622,7 +3786,12 @@ int threadUdp(int *socket_fd)
                           memset(tempstr, 0, 1024);
                           sprintf(tempstr,"%s\r\n",param_p2);
                           commandSendtoHomeDevicePort(client_socket_fd, hid,tempstr );
-                      }else{
+                      }
+                      else if(param_p1!=NULL&&!strcmp(param_p1,"5006"))
+                      {
+                         setStrudyDate(1);
+                      }
+                      else{
                           param_p2 = GetValByKey(p1_obj, "value");
                           memset(tempstr, 0, 1024);
                           sprintf(tempstr,"%s\r\n",param_p2);
