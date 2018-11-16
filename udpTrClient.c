@@ -51,7 +51,8 @@
 #define HARD_VERSION "v2.1.8"
 #define SOFT_VERSION "v2.1.29"
 #define DEVICE_TYPE_E "IJLY_410"
-#define SOFT_VERSION_SHELL "cat /etc/sysinfo.conf |grep soft_version|cut -c 14-"
+//#define SOFT_VERSION_SHELL "cat /etc/sysinfo.conf |grep soft_version|cut -c 14-"
+#define SOFT_VERSION_SHELL "cat /etc/openwrt_version"
 
 int debug_mode = 0;
 
